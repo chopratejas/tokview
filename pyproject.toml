@@ -77,16 +77,27 @@ packages = ["src/headroom_token_view"]
 
 [tool.hatch.build.targets.wheel.force-include]
 # Bundle the SvelteKit build into the wheel so `pipx install` ships
-# the dashboard. Build it with `cd web && npm install && npm run build`
-# BEFORE `python -m build` / `pipx install`.
+# the dashboard. For real releases, run `cd web && npm run build`
+# BEFORE `python -m build`. For editable/CI installs without Node,
+# the hatch_build.py hook below writes a placeholder so the include
+# succeeds and the runtime serves a "run npm run build" message.
 "web/build" = "headroom_token_view/_web"
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+# Runs before the wheel target's force-include is enforced. Creates
+# web/build/index.html placeholder if the SPA wasn't built. See
+# hatch_build.py for details.
+path = "hatch_build.py"
+
+[tool.hatch.build.targets.editable.hooks.custom]
+path = "hatch_build.py"
 
 [tool.hatch.build.targets.sdist]
 include = [
     "src/", "web/", "docs/", "tests/",
-    "README.md", "LICENSE", "CHANGELOG.md",
+    "README.md", "LICENSE", "CHANGELOG.md", "NOTICES.md",
     "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md",
-    "pyproject.toml",
+    "hatch_build.py", "pyproject.toml",
 ]
 exclude = ["web/node_modules/", "web/.svelte-kit/"]
 
