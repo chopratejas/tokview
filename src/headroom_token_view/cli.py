@@ -20,13 +20,14 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click
 
 from . import __version__
-from .config import DEFAULT_CONFIG_PATH, DEFAULT_DIR, HtvConfig, load as load_config
+from .config import DEFAULT_CONFIG_PATH, DEFAULT_DIR, HtvConfig
+from .config import load as load_config
 from .server import serve
 
 LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -63,11 +64,10 @@ def start(foreground: bool, allow_remote: bool) -> None:
     non_loopback = htv.proxy.bind not in LOOPBACK or htv.dashboard.bind not in LOOPBACK
     if non_loopback and not allow_remote:
         raise click.ClickException(
-            "Config requests a non-loopback bind (proxy.bind=%r, dashboard.bind=%r) "
-            "but --allow-remote was not passed.\n"
+            f"Config requests a non-loopback bind (proxy.bind={htv.proxy.bind!r}, "
+            f"dashboard.bind={htv.dashboard.bind!r}) but --allow-remote was not passed.\n"
             "v1 has no authentication; team deploys belong on the Postgres+Docker path.\n"
             "If you accept the risk, run: htv start --allow-remote"
-            % (htv.proxy.bind, htv.dashboard.bind)
         )
 
     # If already running, refuse. We skip this check when we ARE the child
@@ -173,7 +173,7 @@ def status() -> None:
     if running:
         # Fetch diagnostics if we can — quick HTTP call
         try:
-            import httpx  # noqa: PLC0415
+            import httpx
 
             r = httpx.get(f"http://{htv.dashboard.bind}:{htv.dashboard.port}/api/diagnostics", timeout=2.0)
             if r.status_code == 200:
@@ -213,12 +213,12 @@ def export(since: str, fmt: str) -> None:
     # Parse since
     try:
         since_ms = int(since) if since.isdigit() else int(
-            datetime.fromisoformat(since).replace(tzinfo=timezone.utc).timestamp() * 1000
+            datetime.fromisoformat(since).replace(tzinfo=UTC).timestamp() * 1000
         )
     except ValueError as e:
         raise click.ClickException(f"invalid --since {since!r}: {e}")
 
-    import sqlite3  # noqa: PLC0415
+    import sqlite3
 
     con = sqlite3.connect(str(htv.storage.path))
     con.row_factory = sqlite3.Row

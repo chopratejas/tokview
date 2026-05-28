@@ -17,7 +17,6 @@ import pytest
 from headroom_token_view.logger import HtvLogger, _extract_usage, _provider_from_model
 from tests.conftest import FakeResponse, FakeUsage, fake_now, make_kwargs
 
-
 START = fake_now()
 END = START + dt.timedelta(milliseconds=125)
 

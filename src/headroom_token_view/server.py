@@ -42,15 +42,15 @@ async def serve(htv: HtvConfig) -> None:
 
     # Imported lazily so the CONFIG_FILE_PATH and LITELLM_LOCAL_MODEL_COST_MAP
     # env vars are in place at module load.
-    import litellm  # noqa: PLC0415
-    from litellm.proxy.proxy_server import app as litellm_app  # noqa: PLC0415
+    import litellm
+    from litellm.proxy.proxy_server import app as litellm_app
 
-    from .dashboard import build_app  # noqa: PLC0415
-    from .logger import HtvLogger  # noqa: PLC0415
+    from .dashboard import build_app
+    from .logger import HtvLogger
 
     # Register the HTV CustomLogger — it fires after every LiteLLM-handled
     # call and persists the spend row + publishes to the SSE pubsub.
-    from .pubsub import PubSub  # noqa: PLC0415
+    from .pubsub import PubSub
 
     pubsub = PubSub(queue_size=200)
     htv_logger = HtvLogger(db=db, pubsub=pubsub)

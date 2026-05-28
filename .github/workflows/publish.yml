@@ -1,0 +1,49 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    name: Build wheel + publish via Trusted Publishing
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/headroom-token-view/
+    permissions:
+      id-token: write  # OIDC for PyPI Trusted Publishing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build SvelteKit
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel + sdist
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # Trusted Publishing: no API token needed. PyPI verifies the GitHub
+        # repo + workflow + environment via OIDC. Configure the publisher
+        # at https://pypi.org/manage/project/headroom-token-view/settings/publishing/

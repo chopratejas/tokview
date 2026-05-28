@@ -14,10 +14,11 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -52,14 +53,14 @@ def _find_web_build() -> Path | None:
 
 
 def _utc_today_start_ms() -> int:
-    now = datetime.now(timezone.utc)
-    start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    now = datetime.now(UTC)
+    start = datetime(now.year, now.month, now.day, tzinfo=UTC)
     return int(start.timestamp() * 1000)
 
 
 def _utc_month_start_ms() -> int:
-    now = datetime.now(timezone.utc)
-    start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    now = datetime.now(UTC)
+    start = datetime(now.year, now.month, 1, tzinfo=UTC)
     return int(start.timestamp() * 1000)
 
 
@@ -203,7 +204,7 @@ def build_app(db: Database, pubsub: PubSub | None = None) -> FastAPI:
                         break
                     try:
                         msg = await asyncio.wait_for(q.get(), timeout=15.0)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         # heartbeat to keep intermediaries from closing the conn
                         yield b": ping\n\n"
                         continue

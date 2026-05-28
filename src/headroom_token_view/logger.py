@@ -57,7 +57,7 @@ class HtvLogger(CustomLogger):
         # If no loop is running we silently drop — sync callers shouldn't be
         # the source of truth.
         try:
-            import asyncio  # noqa: PLC0415
+            import asyncio
 
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -99,7 +99,7 @@ class HtvLogger(CustomLogger):
         if not messages:
             return 0
         try:
-            from litellm import token_counter  # noqa: PLC0415
+            from litellm import token_counter
 
             return int(token_counter(model=model, messages=messages))
         except Exception:

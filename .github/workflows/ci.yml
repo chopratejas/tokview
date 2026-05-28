@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python (lint + test)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check src tests
+
+      - name: Test
+        run: pytest -q
+
+  web:
+    name: Web (SvelteKit build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install JS deps
+        working-directory: web
+        run: npm ci
+
+      - name: Build SPA
+        working-directory: web
+        run: npm run build
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build
+          path: web/build
+          retention-days: 7
+
+  wheel:
+    name: Build wheel (with SPA)
+    needs: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download SPA build
+        uses: actions/download-artifact@v4
+        with:
+          name: web-build
+          path: web/build
+
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 30

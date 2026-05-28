@@ -224,13 +224,19 @@ class Database:
           provider-truth (disconnect / failure with token estimate).
         - errors_24h: 4xx/5xx in the last 24h.
         """
+        # cost_estimated=1 rows have a known-unknowable cost (e.g. mid-stream
+        # disconnect); exclude them from the missing_pricing canary so we
+        # only flag rows that should have priced but didn't.
         async with self.conn.execute(
             """
             SELECT
-                SUM(CASE WHEN (input_tokens + output_tokens) > 0 AND cost_usd = 0 THEN 1 ELSE 0 END) AS missing_pricing,
-                SUM(cost_estimated)                                                                 AS estimated,
-                SUM(CASE WHEN status_code >= 400 AND ts_ms >= ? THEN 1 ELSE 0 END)                 AS errors_24h,
-                COUNT(*)                                                                            AS total_requests
+                SUM(CASE WHEN (input_tokens + output_tokens) > 0
+                          AND cost_usd = 0
+                          AND cost_estimated = 0
+                         THEN 1 ELSE 0 END)                                                          AS missing_pricing,
+                SUM(cost_estimated)                                                                  AS estimated,
+                SUM(CASE WHEN status_code >= 400 AND ts_ms >= ? THEN 1 ELSE 0 END)                  AS errors_24h,
+                COUNT(*)                                                                             AS total_requests
             FROM requests
             """,
             (int((__import__('time').time() - 86400) * 1000),),

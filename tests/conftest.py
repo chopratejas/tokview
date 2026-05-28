@@ -5,7 +5,6 @@ import datetime as dt
 from pathlib import Path
 from typing import Any
 
-import pytest
 import pytest_asyncio
 
 from headroom_token_view.db import Database
@@ -85,4 +84,4 @@ class FakeResponse:
 
 
 def fake_now() -> dt.datetime:
-    return dt.datetime(2026, 5, 27, 12, 0, 0, tzinfo=dt.timezone.utc)
+    return dt.datetime(2026, 5, 27, 12, 0, 0, tzinfo=dt.UTC)
