@@ -244,6 +244,45 @@ def test_session_user_tags_useragent_propagate():
     assert "claude-cli" in (row["user_agent"] or "")
 
 
+# ---------- latency / TTFT capture ----------
+
+def test_ttft_and_start_ms_from_completion_start_time():
+    """TTFT = completion_start_time - start_time; start_ms from the start arg."""
+    kwargs = make_kwargs(
+        model="anthropic/claude-3-5-sonnet-20240620",
+        provider="anthropic",
+        response_cost=0.002,
+    )
+    # First streamed token arrived 250ms after the request started.
+    kwargs["completion_start_time"] = START + dt.timedelta(milliseconds=250)
+    response = FakeResponse(FakeUsage(prompt_tokens=100, completion_tokens=200))
+    row = build_row(kwargs=kwargs, response=response)
+
+    assert row["start_ms"] == int(START.timestamp() * 1000)
+    assert row["ttft_ms"] == 250
+    # latency comes from the SLP's response_time_in_seconds (0.05 in make_kwargs)
+    assert row["latency_ms"] == 50
+
+
+def test_ttft_none_when_no_completion_start():
+    """Non-streaming / missing completion_start_time leaves ttft_ms null."""
+    kwargs = make_kwargs(model="openai/gpt-4o", provider="openai", response_cost=0.001)
+    response = FakeResponse(FakeUsage(prompt_tokens=10, completion_tokens=5))
+    row = build_row(kwargs=kwargs, response=response)
+    assert row["ttft_ms"] is None
+    # start_ms still derivable from the start_time arg
+    assert row["start_ms"] == int(START.timestamp() * 1000)
+
+
+def test_ttft_ignores_clock_skew():
+    """If completion_start somehow precedes start, don't emit a negative TTFT."""
+    kwargs = make_kwargs(model="openai/gpt-4o", provider="openai", response_cost=0.001)
+    kwargs["completion_start_time"] = START - dt.timedelta(milliseconds=100)
+    response = FakeResponse(FakeUsage(prompt_tokens=10, completion_tokens=5))
+    row = build_row(kwargs=kwargs, response=response)
+    assert row["ttft_ms"] is None
+
+
 # ---------- disconnect / failure tokenizer fallback ----------
 
 def test_failure_with_messages_estimates_input_tokens():

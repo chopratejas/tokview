@@ -215,6 +215,24 @@ class HtvLogger(CustomLogger):
         except Exception:
             latency_ms = None
 
+        # Wall-clock start (ms) and time-to-first-token (ms). LiteLLM records
+        # completion_start_time when the first streamed chunk arrives; the
+        # delta from start is TTFT. Non-streaming calls have no meaningful
+        # TTFT, so we leave it null there.
+        start_ms = _to_ms(start_time)
+        if start_ms is None and latency_ms is not None:
+            start_ms = ts_ms - latency_ms
+
+        ttft_ms: int | None = None
+        completion_start = (
+            kwargs.get("completion_start_time")
+            or slp.get("completionStartTime")
+            or slp.get("completion_start_time")
+        )
+        cs_ms = _to_ms(completion_start)
+        if cs_ms is not None and start_ms is not None and cs_ms >= start_ms:
+            ttft_ms = cs_ms - start_ms
+
         error_message: str | None = None
         if not success:
             exc = kwargs.get("exception") or slp.get("error_str")
@@ -245,11 +263,36 @@ class HtvLogger(CustomLogger):
             "is_stream": int(is_stream),
             "completed": int(success),
             "latency_ms": latency_ms,
+            "start_ms": start_ms,
+            "ttft_ms": ttft_ms,
             "status_code": status_code,
             "error_message": error_message,
             "prompt_text": None,   # capture is opt-in (spec §7); not wired yet
             "response_text": None,
         }
+
+
+def _to_ms(value: Any) -> int | None:
+    """Coerce a timestamp into unix milliseconds.
+
+    LiteLLM hands timestamps as datetime objects (the hook's start/end args)
+    or as floats in unix seconds (inside the StandardLoggingPayload). Be
+    tolerant of both; return None for anything unrecognized.
+    """
+    if value is None:
+        return None
+    # datetime
+    if hasattr(value, "timestamp"):
+        try:
+            return int(value.timestamp() * 1000)
+        except Exception:
+            return None
+    # numeric — assume unix seconds (LiteLLM convention); guard against ms
+    if isinstance(value, (int, float)):
+        v = float(value)
+        # Heuristic: seconds since epoch are ~1.7e9 in 2026; ms would be ~1.7e12.
+        return int(v) if v > 1e11 else int(v * 1000)
+    return None
 
 
 def _provider_from_model(model: str) -> str:

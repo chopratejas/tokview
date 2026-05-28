@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .db import Database
+from .insights import compute_insights, load_pricing_map, model_whatif
 from .pubsub import PubSub
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,10 @@ def build_app(db: Database, pubsub: PubSub | None = None) -> FastAPI:
     )
     app.state.db = db
     app.state.pubsub = pubsub
+    # Pricing map is frozen for the process lifetime (we disable LiteLLM's
+    # runtime cost-map fetch), so load it once. Tests can override via
+    # app.state.pricing.
+    app.state.pricing = load_pricing_map()
 
     @app.get("/api/health")
     def health() -> JSONResponse:
@@ -162,6 +167,47 @@ def build_app(db: Database, pubsub: PubSub | None = None) -> FastAPI:
         since_ms = since if since is not None else _utc_month_start_ms()
         rows = await db.by_session(since_ms, now, limit=limit)
         return JSONResponse({"sessions": rows, "since_ms": since_ms, "until_ms": now})
+
+    @app.get("/api/sessions/{session_id}")
+    async def session_detail(session_id: str) -> JSONResponse:
+        """One session as a waterfall: ordered calls + summary + model what-if."""
+        calls = await db.session_calls(session_id)
+        if not calls:
+            return JSONResponse({"session_id": session_id, "calls": [], "summary": None, "insights": []})
+
+        starts = [c["start_ms"] or c["ts_ms"] for c in calls]
+        ends = [c["ts_ms"] for c in calls]
+        summary = {
+            "session_id": session_id,
+            "requests": len(calls),
+            "cost_usd": round(sum(float(c["cost_usd"] or 0) for c in calls), 6),
+            "input_tokens": sum(int(c["input_tokens"] or 0) for c in calls),
+            "output_tokens": sum(int(c["output_tokens"] or 0) for c in calls),
+            "errors": sum(1 for c in calls if (c["status_code"] or 200) >= 400),
+            "first_ts_ms": min(starts),
+            "last_ts_ms": max(ends),
+            "span_ms": max(ends) - min(starts),
+            "models": sorted({c["model"] for c in calls if c["model"]}),
+        }
+        whatif = model_whatif(calls, app.state.pricing)
+        return JSONResponse({"session_id": session_id, "calls": calls, "summary": summary, "insights": whatif})
+
+    @app.get("/api/insights")
+    async def insights() -> JSONResponse:
+        """Deterministic savings coach over recent activity (no model calls)."""
+        rows = await db.recent_requests(limit=5000)
+        items = compute_insights(rows, app.state.pricing)
+        total = round(sum(i.get("estimated_savings_usd", 0.0) for i in items), 4)
+        return JSONResponse({"insights": items, "total_estimated_savings_usd": total})
+
+    @app.get("/api/latency")
+    async def latency(
+        since: int = Query(default=None),
+    ) -> JSONResponse:
+        now = _now_ms()
+        since_ms = since if since is not None else _utc_month_start_ms()
+        rows = await db.latency_percentiles(since_ms, now)
+        return JSONResponse({"models": rows, "since_ms": since_ms, "until_ms": now})
 
     @app.get("/api/diagnostics")
     async def diagnostics() -> JSONResponse:

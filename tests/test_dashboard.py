@@ -83,6 +83,44 @@ def test_diagnostics_endpoint(client):
     assert body["subscribers"] == 0  # nobody connected to SSE
 
 
+def test_session_detail_returns_waterfall(client):
+    # Both seeded rows share session_id "sess-1" (the _row default)
+    r = client.get("/api/sessions/sess-1")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["session_id"] == "sess-1"
+    assert len(body["calls"]) == 2
+    assert body["summary"]["requests"] == 2
+    assert body["summary"]["errors"] == 1
+    assert body["summary"]["span_ms"] >= 0
+    assert isinstance(body["insights"], list)
+
+
+def test_session_detail_unknown_session_is_empty(client):
+    r = client.get("/api/sessions/does-not-exist")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["calls"] == []
+    assert body["summary"] is None
+
+
+def test_insights_endpoint(client):
+    r = client.get("/api/insights")
+    assert r.status_code == 200
+    body = r.json()
+    assert "insights" in body
+    assert "total_estimated_savings_usd" in body
+    assert isinstance(body["insights"], list)
+
+
+def test_latency_endpoint(client):
+    r = client.get("/api/latency")
+    assert r.status_code == 200
+    body = r.json()
+    assert "models" in body
+    assert isinstance(body["models"], list)
+
+
 def test_static_or_inline_index_renders(client):
     r = client.get("/")
     assert r.status_code == 200

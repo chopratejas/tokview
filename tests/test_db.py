@@ -39,6 +39,8 @@ def _row(**overrides):
         "is_stream": 0,
         "completed": 1,
         "latency_ms": 50,
+        "start_ms": ts - 50,
+        "ttft_ms": None,
         "status_code": 200,
         "error_message": None,
         "prompt_text": None,
@@ -46,6 +48,77 @@ def _row(**overrides):
     }
     base.update(overrides)
     return base
+
+
+async def test_migration_adds_columns_to_old_db(tmp_path):
+    """An old DB without start_ms/ttft_ms should get them via ALTER on open()."""
+    import aiosqlite
+
+    db_path = tmp_path / "old.sqlite"
+    # Simulate a real v0.0.1 database: the full schema MINUS start_ms/ttft_ms
+    # (those are the only columns added in 0.0.2). session_id etc. exist, so
+    # the index creation in SCHEMA stays valid.
+    conn = await aiosqlite.connect(str(db_path))
+    await conn.execute(
+        """
+        CREATE TABLE requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id TEXT UNIQUE NOT NULL,
+            ts_ms INTEGER NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            session_id TEXT,
+            user TEXT,
+            tags TEXT,
+            user_agent TEXT,
+            team_id TEXT,
+            input_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_read_1h_tokens INTEGER NOT NULL DEFAULT 0,
+            reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+            image_tokens INTEGER NOT NULL DEFAULT 0,
+            audio_tokens INTEGER NOT NULL DEFAULT 0,
+            cost_usd REAL NOT NULL,
+            cost_estimated INTEGER NOT NULL DEFAULT 0,
+            is_stream INTEGER NOT NULL,
+            completed INTEGER NOT NULL,
+            latency_ms INTEGER,
+            status_code INTEGER,
+            error_message TEXT,
+            prompt_text TEXT,
+            response_text TEXT
+        )
+        """
+    )
+    await conn.execute(
+        "INSERT INTO requests (request_id, ts_ms, provider, model, input_tokens, "
+        "output_tokens, cost_usd, is_stream, completed) "
+        "VALUES ('old-1', 1, 'openai', 'gpt-4o', 10, 5, 0.01, 0, 1)"
+    )
+    await conn.commit()
+    await conn.close()
+
+    # Opening through HTV should migrate it without losing the existing row.
+    db = Database(db_path)
+    await db.open()
+    try:
+        async with db.conn.execute("PRAGMA table_info(requests)") as cur:
+            cols = {r[1] for r in await cur.fetchall()}
+        assert "start_ms" in cols
+        assert "ttft_ms" in cols
+        assert await db.count_requests() == 1  # existing data preserved
+    finally:
+        await db.close()
+
+
+async def test_migration_is_idempotent(db: Database):
+    """Running _migrate twice must not raise (columns already exist)."""
+    await db._migrate()  # fresh DB already has the columns; should be a no-op
+    async with db.conn.execute("PRAGMA table_info(requests)") as cur:
+        cols = {r[1] for r in await cur.fetchall()}
+    assert "start_ms" in cols and "ttft_ms" in cols
 
 
 async def test_schema_and_pragmas(db: Database):
@@ -103,6 +176,50 @@ async def test_by_provider_includes_failures_for_visibility(db: Database):
     by_p = {r["provider"]: r for r in rows}
     assert "anthropic" in by_p and "openai" in by_p
     assert by_p["anthropic"]["requests"] == 1
+
+
+async def test_session_calls_ordered_oldest_first(db: Database):
+    now = _now_ms()
+    await db.insert_request(_row(request_id="c2", session_id="s", ts_ms=now + 100))
+    await db.insert_request(_row(request_id="c1", session_id="s", ts_ms=now))
+    await db.insert_request(_row(request_id="other", session_id="z", ts_ms=now + 50))
+    calls = await db.session_calls("s")
+    assert [c["request_id"] for c in calls] == ["c1", "c2"]
+
+
+async def test_latency_percentiles_computes_per_model(db: Database):
+    now = _now_ms()
+    # 3 calls on one model with known latency + ttft
+    for i, (lat, ttft, out_tok) in enumerate([(100, 20, 50), (200, 40, 100), (300, 60, 150)]):
+        await db.insert_request(
+            _row(
+                request_id=f"lat-{i}",
+                model="anthropic/claude-3-5-sonnet",
+                provider="anthropic",
+                ts_ms=now + i,
+                latency_ms=lat,
+                ttft_ms=ttft,
+                output_tokens=out_tok,
+                status_code=200,
+            )
+        )
+    out = await db.latency_percentiles(0, now + 1000)
+    assert len(out) == 1
+    row = out[0]
+    assert row["model"] == "anthropic/claude-3-5-sonnet"
+    assert row["count"] == 3
+    assert row["latency_p50"] == 200.0  # median of 100/200/300
+    assert row["ttft_p50"] == 40.0
+    assert row["tokens_per_sec_p50"] is not None
+
+
+async def test_latency_percentiles_excludes_failures(db: Database):
+    now = _now_ms()
+    await db.insert_request(_row(request_id="ok", latency_ms=100, ttft_ms=10, ts_ms=now))
+    await db.insert_request(_row(request_id="err", latency_ms=100, ttft_ms=10, ts_ms=now + 1, status_code=500))
+    out = await db.latency_percentiles(0, now + 1000)
+    total = sum(r["count"] for r in out)
+    assert total == 1  # only the successful call
 
 
 async def test_cost_per_minute_buckets(db: Database):

@@ -15,6 +15,20 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
+
+def _percentile(values: list[float], pct: float) -> float | None:
+    """Nearest-rank percentile. Returns None for an empty list."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return round(ordered[0], 2)
+    rank = (pct / 100.0) * (len(ordered) - 1)
+    lo = int(rank)
+    hi = min(lo + 1, len(ordered) - 1)
+    frac = rank - lo
+    return round(ordered[lo] * (1 - frac) + ordered[hi] * frac, 2)
+
 SCHEMA = """
 PRAGMA journal_mode = WAL;
 PRAGMA busy_timeout = 5000;
@@ -44,6 +58,8 @@ CREATE TABLE IF NOT EXISTS requests (
     is_stream                INTEGER NOT NULL,
     completed                INTEGER NOT NULL,
     latency_ms               INTEGER,
+    start_ms                 INTEGER,
+    ttft_ms                  INTEGER,
     status_code              INTEGER,
     error_message            TEXT,
     prompt_text              TEXT,
@@ -82,8 +98,18 @@ REQUEST_COLS: tuple[str, ...] = (
     "cache_creation_tokens", "cache_read_tokens", "cache_read_1h_tokens",
     "reasoning_tokens", "image_tokens", "audio_tokens",
     "cost_usd", "cost_estimated",
-    "is_stream", "completed", "latency_ms", "status_code", "error_message",
+    "is_stream", "completed", "latency_ms", "start_ms", "ttft_ms",
+    "status_code", "error_message",
     "prompt_text", "response_text",
+)
+
+# Columns added after the initial release. Each entry is (name, SQL type).
+# Applied via ALTER TABLE on open() so existing on-disk databases pick them
+# up without a manual migration. New columns MUST be nullable (no NOT NULL
+# without a default) — SQLite can't add a NOT NULL column to a populated table.
+_MIGRATION_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("start_ms", "INTEGER"),
+    ("ttft_ms", "INTEGER"),
 )
 
 
@@ -104,8 +130,23 @@ class Database:
         self._conn = await aiosqlite.connect(str(self.path))
         self._conn.row_factory = aiosqlite.Row
         await self._conn.executescript(SCHEMA)
+        await self._migrate()
         await self._conn.commit()
         logger.info("htv: opened sqlite at %s", self.path)
+
+    async def _migrate(self) -> None:
+        """Add columns introduced after the initial schema, for old DBs.
+
+        Fresh databases already have these (they're in SCHEMA). Existing
+        on-disk databases get them via ALTER TABLE. Idempotent: skips any
+        column that already exists.
+        """
+        async with self.conn.execute("PRAGMA table_info(requests)") as cur:
+            existing = {row[1] for row in await cur.fetchall()}  # row[1] = column name
+        for name, sql_type in _MIGRATION_COLUMNS:
+            if name not in existing:
+                await self.conn.execute(f"ALTER TABLE requests ADD COLUMN {name} {sql_type}")
+                logger.info("htv: migrated — added requests.%s", name)
 
     async def close(self) -> None:
         if self._conn is not None:
@@ -282,3 +323,60 @@ class Database:
             (since_ms, until_ms, limit),
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
+
+    async def session_calls(self, session_id: str, limit: int = 500) -> list[dict[str, Any]]:
+        """All calls in a session, oldest first — the rows behind a waterfall."""
+        async with self.conn.execute(
+            "SELECT * FROM requests WHERE session_id = ? ORDER BY ts_ms ASC LIMIT ?",
+            (session_id, limit),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def latency_percentiles(self, since_ms: int, until_ms: int) -> list[dict[str, Any]]:
+        """Per-model latency + TTFT percentiles (p50/p95) over a window.
+
+        SQLite has no PERCENTILE function, so we pull the per-model arrays and
+        compute in Python. Volumes here are laptop-scale (thousands of rows),
+        so this is fine. Only successful, completed calls are considered.
+        """
+        async with self.conn.execute(
+            """
+            SELECT provider, model, latency_ms, ttft_ms, output_tokens, ttft_ms IS NOT NULL AS has_ttft
+            FROM requests
+            WHERE ts_ms BETWEEN ? AND ?
+              AND status_code < 400
+              AND latency_ms IS NOT NULL
+            """,
+            (since_ms, until_ms),
+        ) as cur:
+            rows = [dict(r) for r in await cur.fetchall()]
+
+        by_model: dict[tuple[str, str], dict[str, list[float]]] = {}
+        for r in rows:
+            key = (r["provider"] or "unknown", r["model"] or "unknown")
+            acc = by_model.setdefault(key, {"latency": [], "ttft": [], "tps": []})
+            if r["latency_ms"] is not None:
+                acc["latency"].append(float(r["latency_ms"]))
+            if r["ttft_ms"] is not None:
+                acc["ttft"].append(float(r["ttft_ms"]))
+            # tokens/sec over the post-first-token window when we have TTFT
+            if r["ttft_ms"] is not None and r["latency_ms"] and r["output_tokens"]:
+                gen_ms = max(1.0, float(r["latency_ms"]) - float(r["ttft_ms"]))
+                acc["tps"].append(float(r["output_tokens"]) / (gen_ms / 1000.0))
+
+        out: list[dict[str, Any]] = []
+        for (provider, model), acc in by_model.items():
+            out.append(
+                {
+                    "provider": provider,
+                    "model": model,
+                    "count": len(acc["latency"]),
+                    "latency_p50": _percentile(acc["latency"], 50),
+                    "latency_p95": _percentile(acc["latency"], 95),
+                    "ttft_p50": _percentile(acc["ttft"], 50),
+                    "ttft_p95": _percentile(acc["ttft"], 95),
+                    "tokens_per_sec_p50": _percentile(acc["tps"], 50),
+                }
+            )
+        out.sort(key=lambda d: d["count"], reverse=True)
+        return out
