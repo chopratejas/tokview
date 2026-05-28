@@ -63,8 +63,15 @@ Repository = "https://github.com/chopratejas/headroom-token-view"
 [tool.hatch.build.targets.wheel]
 packages = ["src/headroom_token_view"]
 
-[tool.hatch.build.targets.wheel.shared-data]
-# (Iter 5 will embed the SvelteKit build output here)
+[tool.hatch.build.targets.wheel.force-include]
+# Bundle the SvelteKit build into the wheel so `pipx install` ships
+# the dashboard. Build it with `cd web && npm install && npm run build`
+# before `python -m build` / `pipx install`.
+"web/build" = "headroom_token_view/_web"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/", "web/", "docs/", "README.md", "pyproject.toml"]
+exclude = ["web/node_modules/", "web/.svelte-kit/"]
 
 [tool.ruff]
 line-length = 100

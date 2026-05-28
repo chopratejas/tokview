@@ -12,16 +12,43 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from datetime import datetime, timezone
+from importlib.resources import files
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .db import Database
 from .pubsub import PubSub
+
+logger = logging.getLogger(__name__)
+
+
+def _find_web_build() -> Path | None:
+    """Locate the bundled SvelteKit build directory.
+
+    Looks in (a) installed package resources (`_web/`), (b) the editable-dev
+    sibling `../../../web/build/` from this file's parent. Returns None if
+    neither exists; the caller then falls back to the inline HTML.
+    """
+    try:
+        pkg_web = files("headroom_token_view") / "_web"
+        # files() yields a Traversable; coerce to a real path
+        path = Path(str(pkg_web))
+        if (path / "index.html").exists():
+            return path
+    except (FileNotFoundError, ModuleNotFoundError):
+        pass
+    dev_path = Path(__file__).resolve().parent.parent.parent / "web" / "build"
+    if (dev_path / "index.html").exists():
+        return dev_path
+    return None
 
 
 def _utc_today_start_ms() -> int:
@@ -174,9 +201,21 @@ def build_app(db: Database, pubsub: PubSub | None = None) -> FastAPI:
             },
         )
 
-    @app.get("/", response_class=HTMLResponse)
-    def index() -> HTMLResponse:
-        return HTMLResponse(_INDEX_HTML)
+    # Serve the embedded SvelteKit SPA at /. If it isn't built yet (dev
+    # mode without `npm run build`), fall back to the inline HTML below.
+    web_build = _find_web_build()
+    if web_build is not None:
+        logger.info("htv: serving SPA from %s", web_build)
+        app.mount("/", StaticFiles(directory=web_build, html=True), name="spa")
+    else:
+        logger.warning(
+            "htv: SvelteKit build not found; falling back to inline HTML. "
+            "Run `npm run build` in web/ to enable the full dashboard."
+        )
+
+        @app.get("/", response_class=HTMLResponse)
+        def index() -> HTMLResponse:
+            return HTMLResponse(_INDEX_HTML)
 
     return app
 
