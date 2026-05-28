@@ -84,6 +84,9 @@ The reasoning: at laptop QPS, LiteLLM's Python overhead is negligible (single-di
 - A thin `multiprocessing` supervisor restarts the inner workers on crash.
 - Foreground (`htv start --no-daemon`) or background (`htv start`, default).
 
+### 2.5 Auxiliary tables (used by FastAPI for fast aggregates)
+The CustomLogger writes per-request rows; the FastAPI app reads aggregates from `daily_rollup` (for the TODAY / WEEK / MTD cards) and `kv` (for last-known cost-map checksum, last successful refresh, supervisor PID, etc.). Both are SQLite tables in the same DB file; see §4 for schema.
+
 ### 2.4 Stack rationale
 
 | Layer | Choice | Reason |
@@ -202,9 +205,11 @@ CREATE TABLE kv (
 ```
 
 ### 4.2 Maintenance
-- `daily_rollup` updated by a small AFTER INSERT trigger on `requests` (UPSERT pattern).
-- Retention sweeper deletes `requests` rows older than `retention.days` (configurable; default 90) on a daily timer.
-- Schema is **Postgres-portable**: same DDL works under Postgres with trivial type swaps (`AUTOINCREMENT` → `BIGSERIAL`, `INTEGER` → `BIGINT` where appropriate). Migration to 🅑 = swap driver + run script.
+
+**Rollup update strategy — application-layer, not a trigger.** The CustomLogger flusher (which batches up to 50 rows or 100 ms of inserts) computes a per-day delta in memory across the batch and issues **one UPSERT** to `daily_rollup` per affected day per flush. Rationale: a per-row `AFTER INSERT` trigger would fire 50× per flush against the same hot row, multiplying contention without value. App-layer rollup keeps writes amortized and makes the rollup logic explicit (no hidden trigger semantics). A nightly **reconciliation pass** recomputes `daily_rollup` from scratch over the prior 7 days to heal any drift.
+
+- Retention sweeper deletes `requests` rows older than `retention.days` (configurable; default 90) on a daily timer; rollups outlive the raw rows.
+- Schema is **Postgres-portable**: same DDL works under Postgres with trivial type swaps (`AUTOINCREMENT` → `BIGSERIAL`, `INTEGER` → `BIGINT` where appropriate). Migration to 🅑 = swap driver + run schema script + replay reconciliation.
 
 ---
 
@@ -250,7 +255,12 @@ Top bar: provider · model · session · tag · user-agent · time range (last 1
 - **Health** — proxy uptime, last cost-map refresh, missing-pricing alerts.
 
 ### 5.4 Real-time
-The dashboard subscribes to `GET /api/events` (SSE). Every spend event pushed by the CustomLogger fans out to subscribers; the cost ticker increments without polling. Backfill on connect via `GET /api/summary?since=...`.
+The dashboard uses a **two-call pattern** on connect:
+
+1. `GET /api/summary` (and `/api/calls?since=…`) — fetches current aggregates + last N events to paint initial state.
+2. `GET /api/events` (SSE) — subscribes to live spend events; each event arrives as `data: {<spend payload JSON>}\n\n`.
+
+On reconnect after a network blip, the SPA re-issues `/api/calls?since=<last_seen_ts_ms>` to backfill the gap, then re-subscribes to `/api/events`. The SSE endpoint itself does not retain history — backfill is the dedicated job of the REST endpoints. This keeps the SSE channel simple (no replay buffer, no resume tokens) and shifts complexity to REST, which is already paginated.
 
 ---
 
@@ -314,6 +324,7 @@ capture:      { prompts: false, responses: false }
 - Defaults bind to **`127.0.0.1`** only.
 - Provider API keys are read from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) by LiteLLM. Never persisted by HTV.
 - v1 has no auth on the dashboard — localhost-only.
+- The `proxy.bind` / `dashboard.bind` config keys *do* accept non-loopback addresses, but doing so requires the explicit CLI flag `htv start --allow-remote`. Without it, HTV refuses to start with a non-loopback bind and prints a warning explaining that v1 has no authentication and team-deploys belong on the 🅑 path (auth + Postgres). This is an operator-acknowledged escape hatch, not a recommended mode.
 
 ---
 
@@ -338,7 +349,7 @@ capture:
   max_chars_per_field: 8192                # truncate, do not refuse
 ```
 
-When enabled, the request-detail drawer shows the captured text with a 🛡️ badge per redacted span. Captured fields live in `requests.prompt_text` / `requests.response_text` (default NULL).
+**Redaction is applied *before* persistence.** The raw text is matched against every `redact_patterns` regex inside the CustomLogger, matches are replaced with `[REDACTED:<rulename>]`, and only the post-redaction string is written to SQLite. The DB never holds the unredacted secret. The request-detail drawer renders the stored (already-redacted) text with a 🛡️ badge per replacement. Captured fields live in `requests.prompt_text` / `requests.response_text` (default NULL).
 
 ---
 
@@ -347,7 +358,7 @@ When enabled, the request-detail drawer shows the captured text with a 🛡️ b
 | Scenario | Behavior |
 |---|---|
 | Provider 5xx / timeout | Forward upstream status & body verbatim. Row logged with `cost_usd=0`, `status_code`, `error_message`. Surfaced in **Errors** tab. |
-| **Client disconnect mid-stream** ([LiteLLM #14457](https://github.com/BerriAI/litellm/issues/14457)) | HTV detects the unclosed SSE stream. On disconnect: runs the provider's local tokenizer (Anthropic via `anthropic-tokenizer`, OpenAI via `tiktoken`, Gemini via `count_tokens` endpoint) over `(prompt + chunks-received-so-far)` to estimate output tokens. Row stored with `completed=0`, `cost_estimated=1`. Dashboard shows ⚠ on estimated rows. |
+| **Client disconnect mid-stream** ([LiteLLM #14457](https://github.com/BerriAI/litellm/issues/14457)) | HTV detects the unclosed SSE stream. On disconnect: runs the provider's local tokenizer (Anthropic via `anthropic-tokenizer`, OpenAI via `tiktoken`) over `(prompt + chunks-received-so-far)` to estimate output tokens. Gemini ships no local tokenizer — its `count_tokens` is a remote endpoint, so HTV calls it with a **200 ms timeout** and on timeout/failure falls back to a `len(text)/4` char-based estimate. Either way, the row is stored with `completed=0`, `cost_estimated=1`, and the dashboard shows a ⚠ on estimated rows. The estimate is a best-effort placeholder; the source-of-truth remains the provider's eventual billed usage if a webhook or batch reconciliation ever exposes it. |
 | Unknown model / missing pricing ([incident 2026-01-27](https://docs.litellm.ai/blog/model-cost-map-incident)) | Guardrail: `total_tokens > 0 AND cost_usd = 0` → row flagged + dashboard alert *"Missing pricing for model X — update HTV or override in config."* |
 | Pricing-map staleness | Daily fetch of `model_prices_and_context_window.json` with SHA-256 verify; on malformed JSON, retain the last-known-good copy on disk. |
 | SQLite locked under burst | WAL + `busy_timeout=5000` + writes batched (≤50 rows or 100 ms flush). |
@@ -384,7 +395,7 @@ Designed so the v1 → 🅑 jump is **configuration, not a rewrite.**
 | Tenancy | Single user | Multi-user / team | `team_id` column already present (nullable); add filters. |
 | Retention | 90 days | Configurable / unlimited | Already a config knob. |
 
-Forward-compat: schema reserves `team_id`; config has a `tenant_id` namespace placeholder; CSS supports dark/light + brand-token swap.
+Forward-compat: `requests.team_id` is nullable in v1; `daily_rollup` intentionally does NOT carry `team_id` in v1 (single-tenant). On migration to 🅑 we **regenerate rollups from `requests`** with `team_id` as a grouping key — the nightly reconciliation pass (§4.2) is the same code; we just run it once after migration. Config has a `tenant_id` namespace placeholder; CSS supports dark/light + brand-token swap.
 
 ---
 
