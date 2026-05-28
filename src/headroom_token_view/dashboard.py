@@ -1,21 +1,22 @@
 """FastAPI app for the Headroom Token View dashboard backend.
 
-In iter 1 this only exposes /api/health so we can confirm the dashboard
-process is alive. Subsequent iterations add /api/summary, /api/calls,
-/api/sessions, /api/providers, /api/events (SSE) and serve the embedded
-SvelteKit SPA at /.
+In iter 2 we have /api/health, /api/status (db row count + last activity),
+/api/calls (recent rows). Iter 3 will add /api/summary, /api/sessions,
+/api/providers. Iter 4 adds SSE on /api/events.
 """
 from __future__ import annotations
 
 import time
+from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import __version__
+from .db import Database
 
 
-def build_app() -> FastAPI:
+def build_app(db: Database) -> FastAPI:
     started_at = time.time()
     app = FastAPI(
         title="Headroom Token View",
@@ -23,6 +24,8 @@ def build_app() -> FastAPI:
         docs_url=None,  # no Swagger UI by default; spec is dashboard-first
         redoc_url=None,
     )
+    # Expose the DB through app state so endpoints / tests can reach it.
+    app.state.db = db
 
     @app.get("/api/health")
     def health() -> JSONResponse:
@@ -33,6 +36,24 @@ def build_app() -> FastAPI:
                 "uptime_seconds": round(time.time() - started_at, 1),
             }
         )
+
+    @app.get("/api/status")
+    async def status() -> JSONResponse:
+        """Quick liveness + count probe. Useful for verifying the CustomLogger fired."""
+        count = await db.count_requests()
+        return JSONResponse(
+            {
+                "status": "ok",
+                "version": __version__,
+                "uptime_seconds": round(time.time() - started_at, 1),
+                "requests_logged": count,
+            }
+        )
+
+    @app.get("/api/calls")
+    async def calls(limit: int = Query(default=50, ge=1, le=500)) -> JSONResponse:
+        rows: list[dict[str, Any]] = await db.recent_requests(limit=limit)
+        return JSONResponse({"calls": rows, "count": len(rows)})
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:

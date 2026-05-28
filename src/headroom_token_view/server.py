@@ -16,6 +16,7 @@ from pathlib import Path
 import uvicorn
 
 from .config import DEFAULT_DIR, HtvConfig
+from .db import Database
 from .litellm_config import write as write_litellm_config
 
 logger = logging.getLogger(__name__)
@@ -35,13 +36,24 @@ async def serve(htv: HtvConfig) -> None:
     # (per spec §8); until then, prices are pinned to the LiteLLM release.
     os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
+    # Open SQLite (creates the file + schema on first run).
+    db = Database(htv.storage.path)
+    await db.open()
+
     # Imported lazily so the CONFIG_FILE_PATH and LITELLM_LOCAL_MODEL_COST_MAP
     # env vars are in place at module load.
+    import litellm  # noqa: PLC0415
     from litellm.proxy.proxy_server import app as litellm_app  # noqa: PLC0415
 
     from .dashboard import build_app  # noqa: PLC0415
+    from .logger import HtvLogger  # noqa: PLC0415
 
-    dashboard_app = build_app()
+    # Register the HTV CustomLogger — it fires after every LiteLLM-handled
+    # call and persists the spend row + (later) publishes to the SSE pubsub.
+    htv_logger = HtvLogger(db=db, pubsub=None)
+    litellm.callbacks = [htv_logger]
+
+    dashboard_app = build_app(db=db)
 
     proxy_cfg = uvicorn.Config(
         litellm_app,
@@ -75,10 +87,13 @@ async def serve(htv: HtvConfig) -> None:
             # Windows fallback — uvicorn handles SIGINT itself
             pass
 
-    await asyncio.gather(
-        proxy_server.serve(),
-        dash_server.serve(),
-    )
+    try:
+        await asyncio.gather(
+            proxy_server.serve(),
+            dash_server.serve(),
+        )
+    finally:
+        await db.close()
 
 
 def litellm_config_path() -> Path:
