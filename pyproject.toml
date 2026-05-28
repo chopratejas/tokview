@@ -1,0 +1,69 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "headroom-token-view"
+version = "0.0.1"
+description = "Drop-in LLM proxy and dashboard that tracks exact token usage and cost across Claude, OpenAI, Gemini, and any LiteLLM-supported provider."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "tchopra" }]
+keywords = ["llm", "proxy", "tokens", "cost", "anthropic", "openai", "gemini", "litellm", "observability"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "litellm[proxy]>=1.50.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.30",
+    "click>=8.1",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "pyyaml>=6.0",
+    "aiosqlite>=0.20",
+    "httpx>=0.27",
+    "structlog>=24.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-httpx>=0.30",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+htv = "headroom_token_view.cli:main"
+headroom-token-view = "headroom_token_view.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/tchopra/headroom-token-view"
+Repository = "https://github.com/tchopra/headroom-token-view"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/headroom_token_view"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+# (Iter 5 will embed the SvelteKit build output here)
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["E501"]  # line length is enforced softly
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
