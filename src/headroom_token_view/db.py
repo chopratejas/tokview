@@ -140,3 +140,98 @@ class Database:
         ) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
+
+    # ---- aggregates -------------------------------------------------------
+
+    AGG_SQL = """
+        SELECT
+            COALESCE(SUM(cost_usd), 0.0)              AS cost_usd,
+            COUNT(*)                                  AS requests,
+            COALESCE(SUM(input_tokens), 0)            AS input_tokens,
+            COALESCE(SUM(output_tokens), 0)           AS output_tokens,
+            COALESCE(SUM(cache_creation_tokens), 0)   AS cache_creation_tokens,
+            COALESCE(SUM(cache_read_tokens), 0)       AS cache_read_tokens,
+            COALESCE(SUM(reasoning_tokens), 0)        AS reasoning_tokens
+        FROM requests
+        WHERE ts_ms BETWEEN ? AND ?
+          AND status_code < 400
+    """
+
+    async def aggregate(self, since_ms: int, until_ms: int) -> dict[str, Any]:
+        async with self.conn.execute(self.AGG_SQL, (since_ms, until_ms)) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else {}
+
+    async def cost_per_minute(self, since_ms: int, until_ms: int) -> list[dict[str, Any]]:
+        async with self.conn.execute(
+            """
+            SELECT
+                ((ts_ms / 60000) * 60000) AS minute_ms,
+                COALESCE(SUM(cost_usd), 0.0) AS cost_usd,
+                COUNT(*) AS requests
+            FROM requests
+            WHERE ts_ms BETWEEN ? AND ?
+              AND status_code < 400
+            GROUP BY minute_ms
+            ORDER BY minute_ms
+            """,
+            (since_ms, until_ms),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def by_provider(self, since_ms: int, until_ms: int) -> list[dict[str, Any]]:
+        async with self.conn.execute(
+            """
+            SELECT
+                provider,
+                COALESCE(SUM(cost_usd), 0.0) AS cost_usd,
+                COUNT(*)                     AS requests,
+                COALESCE(SUM(input_tokens), 0)  AS input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS output_tokens
+            FROM requests
+            WHERE ts_ms BETWEEN ? AND ?
+            GROUP BY provider
+            ORDER BY cost_usd DESC
+            """,
+            (since_ms, until_ms),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def by_model(self, since_ms: int, until_ms: int, limit: int = 20) -> list[dict[str, Any]]:
+        async with self.conn.execute(
+            """
+            SELECT
+                provider,
+                model,
+                COALESCE(SUM(cost_usd), 0.0) AS cost_usd,
+                COUNT(*)                     AS requests
+            FROM requests
+            WHERE ts_ms BETWEEN ? AND ?
+            GROUP BY provider, model
+            ORDER BY cost_usd DESC
+            LIMIT ?
+            """,
+            (since_ms, until_ms, limit),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def by_session(self, since_ms: int, until_ms: int, limit: int = 20) -> list[dict[str, Any]]:
+        async with self.conn.execute(
+            """
+            SELECT
+                session_id,
+                COALESCE(SUM(cost_usd), 0.0)  AS cost_usd,
+                COUNT(*)                      AS requests,
+                MIN(ts_ms)                    AS first_ts_ms,
+                MAX(ts_ms)                    AS last_ts_ms,
+                GROUP_CONCAT(DISTINCT model)  AS models
+            FROM requests
+            WHERE ts_ms BETWEEN ? AND ?
+              AND session_id IS NOT NULL
+            GROUP BY session_id
+            ORDER BY cost_usd DESC
+            LIMIT ?
+            """,
+            (since_ms, until_ms, limit),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
