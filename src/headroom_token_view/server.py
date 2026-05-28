@@ -28,7 +28,15 @@ async def serve(htv: HtvConfig) -> None:
     write_litellm_config(htv, litellm_config_path)
     os.environ["CONFIG_FILE_PATH"] = str(litellm_config_path)
 
-    # Imported lazily so the CONFIG_FILE_PATH env var is in place at module load
+    # SECURITY: Use the cost map bundled in the pinned LiteLLM wheel — do NOT
+    # fetch model_prices_and_context_window.json from GitHub at runtime.
+    # That auto-fetch is the vector for the 2026-01-27 cost-map incident.
+    # HTV will add its own SHA-256-verified refresh in a later iteration
+    # (per spec §8); until then, prices are pinned to the LiteLLM release.
+    os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
+    # Imported lazily so the CONFIG_FILE_PATH and LITELLM_LOCAL_MODEL_COST_MAP
+    # env vars are in place at module load.
     from litellm.proxy.proxy_server import app as litellm_app  # noqa: PLC0415
 
     from .dashboard import build_app  # noqa: PLC0415

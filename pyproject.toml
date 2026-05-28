@@ -21,16 +21,26 @@ classifiers = [
 ]
 
 dependencies = [
-    "litellm[proxy]>=1.50.0",
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.30",
-    "click>=8.1",
-    "pydantic>=2.6",
-    "pydantic-settings>=2.2",
-    "pyyaml>=6.0",
-    "aiosqlite>=0.20",
-    "httpx>=0.27",
-    "structlog>=24.1",
+    # LiteLLM is the proxy engine. Soft-pinned within the 1.x line so users
+    # automatically pick up new model support and fixes, but a future 2.0
+    # major (which is allowed to break things) cannot land silently.
+    # The real supply-chain hardening is in server.py: we set
+    # LITELLM_LOCAL_MODEL_COST_MAP=True so prices come from the wheel,
+    # not a runtime GitHub fetch (the 2026-01-27 incident vector).
+    "litellm[proxy]>=1.86.1,<2.0.0",
+
+    # Web framework. FastAPI is sub-1.0; cap at <1.0 to be conservative.
+    "fastapi>=0.124.4,<1.0.0",
+    "uvicorn[standard]>=0.33.0,<1.0.0",
+
+    # Other deps: bounded to the next major.
+    "click>=8.1,<9.0",
+    "pydantic>=2.13,<3.0",
+    "pydantic-settings>=2.14,<3.0",
+    "pyyaml>=6.0,<7.0",
+    "aiosqlite>=0.20,<1.0",
+    "httpx>=0.27,<1.0",
+    "structlog>=24.1,<26.0",
 ]
 
 [project.optional-dependencies]
