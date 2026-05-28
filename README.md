@@ -2,7 +2,7 @@
 
 A small, local token viewer for LLM API calls.
 
-It runs a tiny proxy on your laptop. Point your apps at it (one env var) and it shows the exact token usage and cost of every call you make to Claude, OpenAI, Gemini, and anything else [LiteLLM](https://github.com/BerriAI/litellm) supports, in a simple dashboard.
+It runs a tiny proxy on your laptop. Point your apps at it (one env var) and it shows the exact token usage and cost of every call you make to Claude, OpenAI, Gemini, and any other provider you configure, in a simple dashboard.
 
 That's it. No accounts. No cloud. No Docker. One `pipx install`.
 
@@ -56,7 +56,7 @@ Every Claude Code interaction lands in the dashboard.
 
 - $ spent today / this week / month-to-date
 - Per-provider, per-model, per-session, per-tag breakdowns
-- Cache hit visibility (Anthropic prompt caching, OpenAI cached tokens, Gemini context cache)
+- Cache hit visibility (Anthropic prompt caching, OpenAI cached input tokens, Gemini context cache)
 - Reasoning-token costs (o-series, Claude extended thinking)
 - A live tail of recent calls with status + latency
 - Real-time updates via SSE — no refresh needed
@@ -74,17 +74,15 @@ Want any of these? Open an issue. The architecture is designed to evolve into a 
 ## How it works
 
 ```
-Your apps ──► headroom-token-view Proxy ──► Provider APIs
+Your apps ──► headroom-token-view ──► Provider APIs
                        │
                        ├─ writes a row → SQLite
                        └─ pushes a spend event → SSE → Dashboard
 ```
 
-The proxy is [LiteLLM](https://github.com/BerriAI/litellm) underneath, with a thin layer that captures each call's cost (from the provider's own `usage` field — not a tokenizer estimate) and exposes a small REST API + SSE for the dashboard.
+The proxy reads the exact token usage and cost from each provider's response object — Anthropic's `cache_creation_input_tokens` / `cache_read_input_tokens`, OpenAI's `prompt_tokens_details.cached_tokens`, Gemini's `usageMetadata`, the reasoning-tokens fields on o-series and Claude extended-thinking — and applies the right pricing tier for each. **Cost is provider-truth, not a tokenizer estimate.**
 
-The dashboard is SvelteKit + ECharts, bundled into the Python wheel.
-
-Response bytes flow through the proxy unchanged. SDKs don't know they're talking to a proxy — your code doesn't change.
+Your SDK doesn't know it's talking to a proxy. The response bytes are forwarded unchanged; the proxy tees the stream as it flies by so token capture never adds latency to your request.
 
 ## CLI
 
@@ -130,20 +128,19 @@ capture:
 
 ## Security stance
 
-Two things worth knowing:
-
-1. LiteLLM is soft-pinned `>=1.86.1,<2.0.0`. Patches and new-model support arrive automatically on `pipx upgrade`. A future LiteLLM 2.0 major (allowed to break things) is held back until an HTV release verifies it.
-2. The LiteLLM runtime cost-map fetch is **disabled**. Prices come from the pinned wheel, not a GitHub fetch — closing the vector for the [2026-01-27 cost-map incident](https://docs.litellm.ai/blog/model-cost-map-incident).
+- All dependencies on the data path (proxy engine, web framework, ASGI server) are version-pinned. Patches arrive automatically on `pipx upgrade`; major-version jumps require an HTV release.
+- Runtime fetching of model-pricing data is disabled — prices come from the pinned wheel, not a network fetch.
+- Default bind is `127.0.0.1`; non-loopback binds require explicit `htv start --allow-remote` *and* the matching config setting.
 
 Full threat model in [SECURITY.md](SECURITY.md).
 
 ## Status
 
-`v0.0.x` — alpha. Single-user laptop tool. Works against Claude, OpenAI, Gemini and the rest of LiteLLM's catalog.
+`v0.0.x` — alpha. Single-user laptop tool. Works against Claude, OpenAI, Gemini, and 100+ other providers.
 
-Roadmap is short and lives in [CHANGELOG.md](CHANGELOG.md). Highlights for the next milestones:
-- HTV-managed cost-map refresh with hash verification
-- `htv test-providers` smoke command (a $0.001 token per provider)
+Roadmap lives in [CHANGELOG.md](CHANGELOG.md). Near-term:
+- Cost-map refresh with hash verification
+- `htv test-providers` — smoke each configured provider with a $0.001 token
 - Optional Postgres backend for multi-user use
 
 ## Contributing
@@ -158,11 +155,8 @@ pytest -q
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Acknowledgments
-
-- [LiteLLM](https://github.com/BerriAI/litellm) does the actual heavy lifting: provider coverage, cost calculation, streaming-usage parsing. HTV is a thin layer on top.
-- [FastAPI](https://fastapi.tiangolo.com/), [SvelteKit](https://svelte.dev/), [Apache ECharts](https://echarts.apache.org/), and [SQLite](https://www.sqlite.org/).
-
 ## License
 
 [MIT](LICENSE). © 2026 Tejas Chopra.
+
+Bundled open-source dependencies are credited in [NOTICES.md](NOTICES.md).
