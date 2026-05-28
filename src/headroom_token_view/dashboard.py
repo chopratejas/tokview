@@ -162,6 +162,27 @@ def build_app(db: Database, pubsub: PubSub | None = None) -> FastAPI:
         rows = await db.by_session(since_ms, now, limit=limit)
         return JSONResponse({"sessions": rows, "since_ms": since_ms, "until_ms": now})
 
+    @app.get("/api/diagnostics")
+    async def diagnostics() -> JSONResponse:
+        """Guardrails dashboard endpoint. Surfaces:
+           - missing_pricing: rows that completed with tokens > 0 but cost = 0
+             (canary for an unrecognized model — spec §8).
+           - estimated: rows with tokenizer-estimated cost (disconnect path).
+           - errors_24h: failed calls in the last 24h.
+           - subscribers: live SSE subscriber count.
+        """
+        metrics = await db.health_metrics()
+        errors = await db.recent_errors(limit=10)
+        return JSONResponse(
+            {
+                "metrics": metrics,
+                "recent_errors": errors,
+                "subscribers": pubsub.subscriber_count if pubsub is not None else 0,
+                "uptime_seconds": round(time.time() - started_at, 1),
+                "version": __version__,
+            }
+        )
+
     @app.get("/api/events")
     async def events(request: Request) -> StreamingResponse:
         """Server-Sent Events: stream every spend event as it lands.

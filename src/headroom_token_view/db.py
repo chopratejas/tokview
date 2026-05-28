@@ -215,6 +215,47 @@ class Database:
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
+    async def health_metrics(self) -> dict[str, Any]:
+        """Surface guardrail counters for /api/diagnostics.
+
+        - missing_pricing: rows where total_tokens > 0 AND cost = 0.
+          That's the canary for an unrecognized model (spec §8).
+        - estimated: rows where the cost was tokenizer-estimated, not
+          provider-truth (disconnect / failure with token estimate).
+        - errors_24h: 4xx/5xx in the last 24h.
+        """
+        async with self.conn.execute(
+            """
+            SELECT
+                SUM(CASE WHEN (input_tokens + output_tokens) > 0 AND cost_usd = 0 THEN 1 ELSE 0 END) AS missing_pricing,
+                SUM(cost_estimated)                                                                 AS estimated,
+                SUM(CASE WHEN status_code >= 400 AND ts_ms >= ? THEN 1 ELSE 0 END)                 AS errors_24h,
+                COUNT(*)                                                                            AS total_requests
+            FROM requests
+            """,
+            (int((__import__('time').time() - 86400) * 1000),),
+        ) as cur:
+            row = await cur.fetchone()
+            return {
+                "missing_pricing": int(row["missing_pricing"] or 0),
+                "estimated": int(row["estimated"] or 0),
+                "errors_24h": int(row["errors_24h"] or 0),
+                "total_requests": int(row["total_requests"] or 0),
+            }
+
+    async def recent_errors(self, limit: int = 20) -> list[dict[str, Any]]:
+        async with self.conn.execute(
+            """
+            SELECT request_id, ts_ms, provider, model, status_code, error_message
+            FROM requests
+            WHERE status_code >= 400
+            ORDER BY ts_ms DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
     async def by_session(self, since_ms: int, until_ms: int, limit: int = 20) -> list[dict[str, Any]]:
         async with self.conn.execute(
             """

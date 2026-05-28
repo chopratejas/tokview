@@ -245,6 +245,42 @@ def test_session_user_tags_useragent_propagate():
     assert "claude-cli" in (row["user_agent"] or "")
 
 
+# ---------- disconnect / failure tokenizer fallback ----------
+
+def test_failure_with_messages_estimates_input_tokens():
+    """When the call fails before usage is reported, but we have the prompt,
+    HTV runs the tokenizer over the request to set a best-effort input
+    token count and marks cost_estimated=1."""
+    kwargs = make_kwargs(
+        model="openai/gpt-4o",
+        provider="openai",
+        response_cost=0.0,
+        extra_slp={"status_code": 500, "error_str": "boom"},
+    )
+    kwargs["messages"] = [
+        {"role": "user", "content": "Write a haiku about latency budgets."}
+    ]
+    row = build_row(kwargs=kwargs, response=None, success=False)
+    assert row["completed"] == 0
+    assert row["input_tokens"] > 0, "expected tokenizer estimate"
+    assert row["cost_estimated"] == 1
+    assert row["cost_usd"] == 0.0  # we don't price the estimate; spec §8
+
+
+def test_failure_without_messages_leaves_zero_tokens_unestimated():
+    """If we have no prompt and the call failed, there's nothing to estimate
+    — leave input_tokens=0 and cost_estimated=0."""
+    kwargs = make_kwargs(
+        model="openai/gpt-4o",
+        provider="openai",
+        response_cost=0.0,
+    )
+    kwargs["exception"] = "transport error before request reached the provider"
+    row = build_row(kwargs=kwargs, response=None, success=False)
+    assert row["input_tokens"] == 0
+    assert row["cost_estimated"] == 0
+
+
 # ---------- helpers / inference ----------
 
 def test_provider_inference_from_model_when_missing():

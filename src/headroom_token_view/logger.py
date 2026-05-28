@@ -87,6 +87,38 @@ class HtvLogger(CustomLogger):
     # ---- row builder ------------------------------------------------------
 
     @staticmethod
+    def _estimate_input_tokens(kwargs: dict[str, Any], model: str) -> int:
+        """Tokenizer-based estimate of input tokens for failure / disconnect rows.
+
+        LiteLLM's token_counter dispatches to the right tokenizer per provider
+        (tiktoken / anthropic / vertex). For Gemini specifically there's no
+        local tokenizer, so we fall back to a char-based estimate; this is
+        only ever used as a best-effort signal — costs marked cost_estimated=1.
+        """
+        messages = kwargs.get("messages") or []
+        if not messages:
+            return 0
+        try:
+            from litellm import token_counter  # noqa: PLC0415
+
+            return int(token_counter(model=model, messages=messages))
+        except Exception:
+            # Char-based fallback (per spec §8 looser bound). Roughly 4 chars/token.
+            try:
+                text = ""
+                for m in messages:
+                    c = m.get("content") if isinstance(m, dict) else ""
+                    if isinstance(c, str):
+                        text += c
+                    elif isinstance(c, list):
+                        for part in c:
+                            if isinstance(part, dict):
+                                text += str(part.get("text") or part.get("input") or "")
+                return max(1, len(text) // 4)
+            except Exception:
+                return 0
+
+    @staticmethod
     def _build_row(
         kwargs: dict[str, Any],
         response_obj: Any,
@@ -160,6 +192,18 @@ class HtvLogger(CustomLogger):
         # Streaming / completion
         is_stream = bool(slp.get("stream") or kwargs.get("stream") or False)
 
+        # For failures / disconnects LiteLLM hands us a usage of zero. Best-
+        # effort tokenizer estimate fills the input_tokens column so the
+        # dashboard at least shows the call wasn't free upstream. Output
+        # tokens for a streaming disconnect are unknowable locally; we leave
+        # output at 0 and mark cost_estimated=1.
+        cost_estimated = 0
+        if not success and input_tokens == 0:
+            est = HtvLogger._estimate_input_tokens(kwargs, str(model))
+            if est > 0:
+                input_tokens = est
+                cost_estimated = 1
+
         # Latency
         latency_ms: int | None = None
         try:
@@ -197,7 +241,7 @@ class HtvLogger(CustomLogger):
             "image_tokens": image_tokens,
             "audio_tokens": audio_tokens,
             "cost_usd": cost_usd,
-            "cost_estimated": 0,
+            "cost_estimated": cost_estimated,
             "is_stream": int(is_stream),
             "completed": int(success),
             "latency_ms": latency_ms,
