@@ -1,6 +1,6 @@
 # Headroom Token View — v1 Design
 
-> **Status:** Draft for review · **Author:** tchopra · **Date:** 2026-05-27
+> **Status:** Draft for review · **Author:** Tejas Chopra · **Date:** 2026-05-27
 
 A single-binary-feeling LLM proxy + dashboard that tracks **exact** token usage and cost across Claude, OpenAI, Gemini, and any other provider LiteLLM supports. v1 ships as `pipx install headroom-token-view && htv start` for solo laptop use; the same codebase grows into a team / SaaS deployment ("🅑") with a config change, not a rewrite.
 

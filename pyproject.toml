@@ -9,7 +9,7 @@ description = "Drop-in LLM proxy and dashboard that tracks exact token usage and
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-authors = [{ name = "tchopra" }]
+authors = [{ name = "Tejas Chopra", email = "chopratejas@gmail.com" }]
 keywords = ["llm", "proxy", "tokens", "cost", "anthropic", "openai", "gemini", "litellm", "observability"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -57,8 +57,8 @@ htv = "headroom_token_view.cli:main"
 headroom-token-view = "headroom_token_view.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/tchopra/headroom-token-view"
-Repository = "https://github.com/tchopra/headroom-token-view"
+Homepage = "https://github.com/chopratejas/headroom-token-view"
+Repository = "https://github.com/chopratejas/headroom-token-view"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/headroom_token_view"]
