@@ -9,15 +9,24 @@ description = "Drop-in LLM proxy and dashboard that tracks exact token usage and
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Tejas Chopra", email = "chopratejas@gmail.com" }]
 keywords = ["llm", "proxy", "tokens", "cost", "anthropic", "openai", "gemini", "litellm", "observability"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: System Administrators",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Monitoring",
+    "Topic :: Internet :: Proxy Servers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
 dependencies = [
@@ -57,8 +66,11 @@ htv = "headroom_token_view.cli:main"
 headroom-token-view = "headroom_token_view.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/chopratejas/headroom-token-view"
-Repository = "https://github.com/chopratejas/headroom-token-view"
+Homepage      = "https://github.com/chopratejas/headroom-token-view"
+Repository    = "https://github.com/chopratejas/headroom-token-view"
+Documentation = "https://github.com/chopratejas/headroom-token-view#readme"
+Issues        = "https://github.com/chopratejas/headroom-token-view/issues"
+Changelog     = "https://github.com/chopratejas/headroom-token-view/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/headroom_token_view"]
@@ -66,12 +78,22 @@ packages = ["src/headroom_token_view"]
 [tool.hatch.build.targets.wheel.force-include]
 # Bundle the SvelteKit build into the wheel so `pipx install` ships
 # the dashboard. Build it with `cd web && npm install && npm run build`
-# before `python -m build` / `pipx install`.
+# BEFORE `python -m build` / `pipx install`.
 "web/build" = "headroom_token_view/_web"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/", "web/", "docs/", "README.md", "pyproject.toml"]
+include = [
+    "src/", "web/", "docs/", "tests/",
+    "README.md", "LICENSE", "CHANGELOG.md",
+    "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md",
+    "pyproject.toml",
+]
 exclude = ["web/node_modules/", "web/.svelte-kit/"]
+
+[tool.hatch.build.targets.sdist.force-include]
+# Carry the SvelteKit build through the sdist so the standard
+# `python -m build` flow (sdist -> wheel-from-sdist) succeeds.
+"web/build" = "web/build"
 
 [tool.ruff]
 line-length = 100
