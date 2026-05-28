@@ -77,17 +77,17 @@ The reasoning: at laptop QPS, LiteLLM's Python overhead is negligible (single-di
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.3 Process model
+### 2.3 Auxiliary tables (used by FastAPI for fast aggregates)
+The CustomLogger writes per-request rows; the FastAPI app reads aggregates from `daily_rollup` (for the TODAY / WEEK / MTD cards) and `kv` (for last-known cost-map checksum, last successful refresh, supervisor PID, etc.). Both are SQLite tables in the same DB file; see §4 for schema.
+
+### 2.4 Process model
 
 - A single Python process hosts: LiteLLM Proxy (uvicorn worker), the FastAPI dashboard backend, and serves the SPA static assets.
 - LiteLLM and FastAPI run on **separate ports** (4000 and 3000) so dashboards can be exposed without exposing the proxy and vice-versa.
 - A thin `multiprocessing` supervisor restarts the inner workers on crash.
 - Foreground (`htv start --no-daemon`) or background (`htv start`, default).
 
-### 2.5 Auxiliary tables (used by FastAPI for fast aggregates)
-The CustomLogger writes per-request rows; the FastAPI app reads aggregates from `daily_rollup` (for the TODAY / WEEK / MTD cards) and `kv` (for last-known cost-map checksum, last successful refresh, supervisor PID, etc.). Both are SQLite tables in the same DB file; see §4 for schema.
-
-### 2.4 Stack rationale
+### 2.5 Stack rationale
 
 | Layer | Choice | Reason |
 |---|---|---|
@@ -324,7 +324,7 @@ capture:      { prompts: false, responses: false }
 - Defaults bind to **`127.0.0.1`** only.
 - Provider API keys are read from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) by LiteLLM. Never persisted by HTV.
 - v1 has no auth on the dashboard — localhost-only.
-- The `proxy.bind` / `dashboard.bind` config keys *do* accept non-loopback addresses, but doing so requires the explicit CLI flag `htv start --allow-remote`. Without it, HTV refuses to start with a non-loopback bind and prints a warning explaining that v1 has no authentication and team-deploys belong on the 🅑 path (auth + Postgres). This is an operator-acknowledged escape hatch, not a recommended mode.
+- The `proxy.bind` / `dashboard.bind` config keys *do* accept non-loopback addresses, but two conditions must **both** be satisfied: the config value is non-loopback AND the CLI is invoked with `htv start --allow-remote`. If the config requests a non-loopback bind without the flag, HTV refuses to start and prints a warning explaining that v1 has no authentication and team-deploys belong on the 🅑 path (auth + Postgres). The flag is an explicit operator acknowledgement; it does not override or silence the bind config — it only unlocks the config that's already there.
 
 ---
 
@@ -375,7 +375,7 @@ capture:
 |---|---|
 | **Pricing math** | Property tests over random `usage` payloads + pricing rows. Snapshot tests with hand-computed expected costs per major model (claude-3-7-sonnet, gpt-4o, gemini-2.5-pro). Cover cache tiers, reasoning tokens, image/audio. |
 | **Streaming parser** | Recorded SSE fixtures from real provider responses (replayed via `pytest-httpx`); assert captured token counts == known-good. Edge cases: vLLM trailing usage ([#25389](https://github.com/BerriAI/litellm/issues/25389)), Anthropic `message_delta`, OpenAI `stream_options.include_usage`. |
-| **Disconnect handling** | Integration: client cancels mid-stream → row written with `completed=0` and tokenizer estimate within ±10% of provider's actual usage. |
+| **Disconnect handling** | Integration: client cancels mid-stream → row written with `completed=0`. For **Anthropic / OpenAI**, the tokenizer-based estimate must be within ±10% of the provider's actual usage (when usage is later observable in a retry). For **Gemini's char-based fallback** (used when `count_tokens` times out), the bound is looser: ±30% acceptable, since the fallback is "any signal is better than zero" rather than an accurate estimate. Tested separately per provider. |
 | **Dashboard SSE** | Playwright e2e: trigger a call → cost ticker increments within 1 s. |
 | **End-to-end smoke** | `HTV_E2E=1` gated test that hits each real provider once. Skipped in CI by default to preserve quota. |
 | **Pricing-map regression** | CI fetches latest cost map; warns on `>5%` price delta per model day-over-day (catches incidents like 2026-01-27). |
