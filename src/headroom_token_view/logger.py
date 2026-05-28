@@ -41,7 +41,7 @@ class HtvLogger(CustomLogger):
             row = self._build_row(kwargs, response_obj, start_time, end_time, success=True)
             await self.db.insert_request(row)
             if self.pubsub is not None:
-                await self.pubsub.publish(row)
+                await self.pubsub.publish({"event": "spend", "row": row})
         except Exception:
             logger.exception("htv: failed to log success event")
 
@@ -80,7 +80,7 @@ class HtvLogger(CustomLogger):
             row = self._build_row(kwargs, response_obj, start_time, end_time, success=False)
             await self.db.insert_request(row)
             if self.pubsub is not None:
-                await self.pubsub.publish(row)
+                await self.pubsub.publish({"event": "spend", "row": row})
         except Exception:
             logger.exception("htv: failed to log failure event")
 

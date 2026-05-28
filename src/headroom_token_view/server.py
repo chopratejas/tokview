@@ -49,11 +49,14 @@ async def serve(htv: HtvConfig) -> None:
     from .logger import HtvLogger  # noqa: PLC0415
 
     # Register the HTV CustomLogger — it fires after every LiteLLM-handled
-    # call and persists the spend row + (later) publishes to the SSE pubsub.
-    htv_logger = HtvLogger(db=db, pubsub=None)
+    # call and persists the spend row + publishes to the SSE pubsub.
+    from .pubsub import PubSub  # noqa: PLC0415
+
+    pubsub = PubSub(queue_size=200)
+    htv_logger = HtvLogger(db=db, pubsub=pubsub)
     litellm.callbacks = [htv_logger]
 
-    dashboard_app = build_app(db=db)
+    dashboard_app = build_app(db=db, pubsub=pubsub)
 
     proxy_cfg = uvicorn.Config(
         litellm_app,

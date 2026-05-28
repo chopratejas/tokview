@@ -10,15 +10,18 @@ Iter 3 exposes:
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import time
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from . import __version__
 from .db import Database
+from .pubsub import PubSub
 
 
 def _utc_today_start_ms() -> int:
@@ -37,7 +40,7 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def build_app(db: Database) -> FastAPI:
+def build_app(db: Database, pubsub: PubSub | None = None) -> FastAPI:
     started_at = time.time()
     app = FastAPI(
         title="Headroom Token View",
@@ -46,6 +49,7 @@ def build_app(db: Database) -> FastAPI:
         redoc_url=None,
     )
     app.state.db = db
+    app.state.pubsub = pubsub
 
     @app.get("/api/health")
     def health() -> JSONResponse:
@@ -130,6 +134,45 @@ def build_app(db: Database) -> FastAPI:
         since_ms = since if since is not None else _utc_month_start_ms()
         rows = await db.by_session(since_ms, now, limit=limit)
         return JSONResponse({"sessions": rows, "since_ms": since_ms, "until_ms": now})
+
+    @app.get("/api/events")
+    async def events(request: Request) -> StreamingResponse:
+        """Server-Sent Events: stream every spend event as it lands.
+
+        SPA subscribes on connect; on reconnect after a network blip it
+        replays missed activity via /api/calls?since=<last_seen_ts_ms>
+        (the SSE channel itself does not retain history — see spec §5.4).
+        """
+        if pubsub is None:
+            return StreamingResponse(iter(()), media_type="text/event-stream")
+
+        async def stream() -> AsyncIterator[bytes]:
+            async with pubsub.subscribe() as q:
+                # initial hello so the client knows it's connected
+                yield b": connected\n\n"
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        msg = await asyncio.wait_for(q.get(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        # heartbeat to keep intermediaries from closing the conn
+                        yield b": ping\n\n"
+                        continue
+                    event = msg.get("event", "message") if isinstance(msg, dict) else "message"
+                    payload = msg.get("row") if isinstance(msg, dict) else msg
+                    yield f"event: {event}\n".encode()
+                    yield b"data: " + json.dumps(payload, default=str).encode() + b"\n\n"
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
@@ -364,8 +407,65 @@ _INDEX_HTML = """<!doctype html>
       return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
 
+    // Initial paint + a slow safety-net poll. Real updates come from SSE.
     refresh();
-    setInterval(refresh, 3000);
+    setInterval(refresh, 15000);
+
+    // Subscribe to live spend events. EventSource auto-reconnects on drop;
+    // /api/calls?since= is the documented backfill path (spec §5.4).
+    let lastEventMs = Date.now();
+    function subscribe() {
+      const es = new EventSource('/api/events');
+      es.addEventListener('spend', (e) => {
+        lastEventMs = Date.now();
+        try { applySpend(JSON.parse(e.data)); }
+        catch (err) { console.warn('bad spend event', err); refresh(); }
+      });
+      es.onerror = () => {
+        // EventSource handles reconnect itself; we just refresh on resume
+        setTimeout(refresh, 1000);
+      };
+    }
+
+    // Optimistic UI update on a new spend row.
+    let lastSummary = null;
+    function applySpend(row) {
+      if (!row) return;
+      // Bump tiles (only successful + within-window calls add to cost; failures still pop into the live tail)
+      if (lastSummary) {
+        if (row.completed && row.status_code < 400) {
+          ['today', 'week', 'mtd'].forEach(k => {
+            lastSummary[k].cost_usd = (lastSummary[k].cost_usd || 0) + (row.cost_usd || 0);
+            lastSummary[k].requests = (lastSummary[k].requests || 0) + 1;
+            lastSummary[k].input_tokens = (lastSummary[k].input_tokens || 0) + (row.input_tokens || 0);
+            lastSummary[k].output_tokens = (lastSummary[k].output_tokens || 0) + (row.output_tokens || 0);
+            lastSummary[k].cache_read_tokens = (lastSummary[k].cache_read_tokens || 0) + (row.cache_read_tokens || 0);
+          });
+          renderSummary(lastSummary);
+        }
+      }
+      // Prepend to the live tail
+      const tbody = $('calls');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="muted">${fmtTs(row.ts_ms)}</td>
+        <td>${escape(row.provider || '')}</td>
+        <td>${escape(row.model || '')}</td>
+        <td class="num">${fmtNum(row.input_tokens)} &rarr; ${fmtNum(row.output_tokens)}</td>
+        <td class="num">${fmtUsdSmall(row.cost_usd)}</td>
+        <td class="muted">${escape((row.session_id || '').slice(0, 16))}</td>
+      `;
+      tr.style.background = 'rgba(124, 92, 255, 0.08)';
+      setTimeout(() => { tr.style.background = ''; }, 1500);
+      if (tbody.firstChild) tbody.insertBefore(tr, tbody.firstChild); else tbody.appendChild(tr);
+      while (tbody.children.length > 20) tbody.removeChild(tbody.lastChild);
+    }
+
+    // Wrap renderSummary so we keep a reference for optimistic updates.
+    const _renderSummary = renderSummary;
+    renderSummary = function (s) { lastSummary = s; _renderSummary(s); };
+
+    subscribe();
   </script>
 </body>
 </html>"""
