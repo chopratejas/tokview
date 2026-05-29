@@ -54,6 +54,14 @@ ANTHROPIC_BASE_URL=http://localhost:4000 claude
 
 Every Claude Code interaction lands in the dashboard.
 
+## Why it's different
+
+Three things have to be true at once, and tokview is the only tool we know of where they all are:
+
+- **Tool-level token attribution.** Not just "this call used 180k tokens" — *which tool* spent them. It catches the dominant hidden agent cost: a big tool result (a `Read`, an MCP dump) re-billed as input on every later turn.
+- **Drop-in proxy, no instrumentation.** Tracing platforms surface tool detail only if you wrap your code in their SDK. tokview gets it from one env var — for any app or CLI you can point at a URL, even ones you can't modify, like Claude Code.
+- **Fully local.** SQLite on your laptop. No account, no cloud, nothing leaves your machine.
+
 ## What it shows
 
 - $ spent today / this week / month-to-date, updating live via SSE — no refresh
