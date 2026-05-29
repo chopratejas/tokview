@@ -7,6 +7,13 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.3] — 2026-05-30
+
+### Fixed
+- Cap package metadata at Python `<3.14` because LiteLLM's proxy stack does not
+  currently resolve on Python 3.14. This makes `pipx` fail early with an
+  accurate Python-version error instead of a dependency-resolution conflict.
+
 ## [0.0.2] — 2026-05-29
 
 ### Added
@@ -67,6 +74,7 @@ First release. A small, local, single-user token viewer.
 - Default bind `127.0.0.1`. A non-loopback bind requires `--allow-remote` on
   the CLI **and** the corresponding config setting.
 
-[Unreleased]: https://github.com/chopratejas/tokview/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/chopratejas/tokview/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/chopratejas/tokview/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/chopratejas/tokview/releases/tag/v0.0.2
 [0.0.1]: https://github.com/chopratejas/tokview/releases/tag/v0.0.1

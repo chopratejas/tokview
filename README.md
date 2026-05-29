@@ -5,7 +5,7 @@
 [![CI](https://github.com/chopratejas/tokview/actions/workflows/ci.yml/badge.svg)](https://github.com/chopratejas/tokview/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/token-viewer.svg)](https://pypi.org/project/token-viewer/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python](https://img.shields.io/badge/python-3.11--3.13-blue.svg)](https://www.python.org/downloads/)
 
 A tiny **local** proxy plus a **web dashboard**. Point any app at the proxy with one env var; the dashboard at `localhost:3000` then breaks your token spend down by model, by session, and — uniquely — by *tool call*.
 
@@ -38,6 +38,13 @@ pipx install token-viewer    # the command it installs is `tokview`
 tokview start
 ```
 
+tokview currently supports Python 3.11 through 3.13. If `pipx` is configured to
+use a newer interpreter, install with a supported one:
+
+```bash
+pipx install --python python3.13 token-viewer
+```
+
 Prefer [uv](https://docs.astral.sh/uv/)? It's faster, and you don't even have to install to try it:
 
 ```bash
@@ -52,7 +59,7 @@ You'll see:
 
 ```
 +--------------------------------------------------------------------------+
-| tokview v0.0.2                                               |
+| tokview v0.0.3                                               |
 |                                                                          |
 |   started in background (pid 12345)                                      |
 +--------------------------------------------------------------------------+
