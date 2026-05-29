@@ -20,11 +20,21 @@ pipx install token-viewer    # the command it installs is `tokview`
 tokview start
 ```
 
+Prefer [uv](https://docs.astral.sh/uv/)? It's faster, and you don't even have to install to try it:
+
+```bash
+uv tool install token-viewer    # installs the `tokview` command
+tokview start
+
+# or run it once, no install:
+uvx --from token-viewer tokview start
+```
+
 You'll see:
 
 ```
 +--------------------------------------------------------------------------+
-| tokview v0.0.1                                               |
+| tokview v0.0.2                                               |
 |                                                                          |
 |   started in background (pid 12345)                                      |
 +--------------------------------------------------------------------------+
