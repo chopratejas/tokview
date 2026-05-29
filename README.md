@@ -1,17 +1,35 @@
 # tokview
 
-**See where your tokens actually go — down to the individual tool call.**
-
-tokview is a small, local token viewer for LLM API calls. It runs a tiny proxy on your laptop; point your apps at it (one env var) and it shows the exact token usage and cost of every call to Claude, OpenAI, Gemini, or any provider you configure — and, uniquely, **which tools ate your tokens**.
-
-Most tools tell you a call used 180k tokens. tokview tells you *that 140k of them were a single `Read` result re-sent on every turn, and your `mcp__github__search` calls quietly added 40k more.* Tracing platforms can show this **if** you instrument your code with their SDK; gateways track per-request cost but not per-tool tokens. tokview is the only one we know of that does per-tool token attribution as a **drop-in local proxy** — no SDK, no code changes, works with any app or CLI you can point at a URL (even Claude Code itself).
-
-No accounts. No cloud. No Docker. One install.
+> **See exactly where your LLM tokens go — down to the individual tool call.**
 
 [![CI](https://github.com/chopratejas/tokview/actions/workflows/ci.yml/badge.svg)](https://github.com/chopratejas/tokview/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/token-viewer.svg)](https://pypi.org/project/token-viewer/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11--3.13-blue.svg)](https://www.python.org/downloads/)
+
+A tiny **local** proxy plus a **web dashboard**. Point any app at the proxy with one env var; the dashboard at `localhost:3000` then breaks your token spend down by model, by session, and — uniquely — by *tool call*.
+
+<!--
+  Real dashboard screenshot goes here. Once captured, drop the image in docs/
+  and uncomment the line below (it can sit above or replace the sketch):
+  ![tokview dashboard](docs/dashboard.png)
+-->
+
+Here's the per-tool breakdown it surfaces (sketch — a real screenshot is coming):
+
+```text
+  the dashboard · session: claude-code · 47 calls · 2.1M tokens
+  ──────────────────────────────────────────────────────────────────────────────────
+  Read                  ×12   1,240k  ████████████████████████████████████      59%
+  mcp__github__search   ×5      410k  ███████████                               20%
+  Bash                  ×8      180k  █████                                      9%
+  Edit                  ×3       95k  ██                                         4%
+  prompt + messages            175k  █████                                      8%
+  ──────────────────────────────────────────────────────────────────────────────────
+  ⚠  one Read result rode along on 9 later turns — ~140k tokens re-sent as input
+```
+
+Most tools just tell you a call used 180k tokens. tokview tells you *which tool* spent them — and catches the dominant hidden agent cost: a big tool result (a `Read`, an MCP dump) re-billed as input on every later turn. Tracing platforms can show this only if you wrap your code in their SDK; tokview gets it from one env var, for any app or CLI you can point at a URL — even Claude Code. No account, no cloud, no Docker.
 
 ## Quick start
 
@@ -27,11 +45,21 @@ use a newer interpreter, install with a supported one:
 pipx install --python python3.13 token-viewer
 ```
 
+Prefer [uv](https://docs.astral.sh/uv/)? It's faster, and you don't even have to install to try it:
+
+```bash
+uv tool install token-viewer    # installs the `tokview` command
+tokview start
+
+# or run it once, no install:
+uvx --from token-viewer tokview start
+```
+
 You'll see:
 
 ```
 +--------------------------------------------------------------------------+
-| tokview v0.0.1                                               |
+| tokview v0.0.3                                               |
 |                                                                          |
 |   started in background (pid 12345)                                      |
 +--------------------------------------------------------------------------+
