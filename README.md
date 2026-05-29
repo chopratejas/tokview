@@ -1,20 +1,22 @@
 # tokview
 
-A small, local token viewer for LLM API calls.
+**See where your tokens actually go — down to the individual tool call.**
 
-It runs a tiny proxy on your laptop. Point your apps at it (one env var) and it shows the exact token usage and cost of every call you make to Claude, OpenAI, Gemini, and any other provider you configure, in a simple dashboard.
+tokview is a small, local token viewer for LLM API calls. It runs a tiny proxy on your laptop; point your apps at it (one env var) and it shows the exact token usage and cost of every call to Claude, OpenAI, Gemini, or any provider you configure — and, uniquely, **which tools ate your tokens**.
 
-That's it. No accounts. No cloud. No Docker. One `pipx install`.
+Most tools tell you a call used 180k tokens. tokview tells you *that 140k of them were a single `Read` result re-sent on every turn, and your `mcp__github__search` calls quietly added 40k more.* Tracing platforms can show this **if** you instrument your code with their SDK; gateways track per-request cost but not per-tool tokens. tokview is the only one we know of that does per-tool token attribution as a **drop-in local proxy** — no SDK, no code changes, works with any app or CLI you can point at a URL (even Claude Code itself).
+
+No accounts. No cloud. No Docker. One install.
 
 [![CI](https://github.com/chopratejas/tokview/actions/workflows/ci.yml/badge.svg)](https://github.com/chopratejas/tokview/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/tokview.svg)](https://pypi.org/project/tokview/)
+[![PyPI](https://img.shields.io/pypi/v/token-viewer.svg)](https://pypi.org/project/token-viewer/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
 ## Quick start
 
 ```bash
-pipx install tokview
+pipx install token-viewer    # the command it installs is `tokview`
 tokview start
 ```
 
@@ -84,6 +86,8 @@ Your apps ──► tokview ──► Provider APIs
 The proxy reads the exact token usage and cost from each provider's response object — Anthropic's `cache_creation_input_tokens` / `cache_read_input_tokens`, OpenAI's `prompt_tokens_details.cached_tokens`, Gemini's `usageMetadata`, the reasoning-tokens fields on o-series and Claude extended-thinking — and applies the right pricing tier for each. **Cost is provider-truth, not a tokenizer estimate.**
 
 Your SDK doesn't know it's talking to a proxy. The response bytes are forwarded unchanged; the proxy tees the stream as it flies by so token capture never adds latency to your request.
+
+**Tool-level attribution** comes from the same stream. An agent's tool calls flow through the proxy as structured blocks — `tool_use`/`tool_result` (Anthropic) or `tool_calls`/`role:tool` (OpenAI) — so tokview parses them out and tokenizes each tool's arguments and results locally. That gives you per-tool, per-session token estimates with no extra instrumentation. (It's an *estimate*, by design: the provider bills per call, not per block, and cache discounts make per-tool *cost* meaningless — so tokview reports tokens, not dollars, at the tool level. A proxy can see what a tool *returned*; it can't see the tool *execute* — that's client-side.)
 
 ## CLI
 

@@ -2,7 +2,7 @@
 
 > **Status:** Draft for review · **Author:** Tejas Chopra · **Date:** 2026-05-27
 
-A single-binary-feeling LLM proxy + dashboard that tracks **exact** token usage and cost across Claude, OpenAI, Gemini, and any other provider LiteLLM supports. v1 ships as `pipx install tokview && tokview start` for solo laptop use; the same codebase grows into a team / SaaS deployment ("🅑") with a config change, not a rewrite.
+A single-binary-feeling LLM proxy + dashboard that tracks **exact** token usage and cost across Claude, OpenAI, Gemini, and any other provider LiteLLM supports. v1 ships as `pipx install token-viewer && tokview start` for solo laptop use; the same codebase grows into a team / SaaS deployment ("🅑") with a config change, not a rewrite.
 
 ---
 
@@ -13,7 +13,7 @@ A single-binary-feeling LLM proxy + dashboard that tracks **exact** token usage 
 - **Exact cost** per request, from the provider's returned `usage` field (ground truth), priced via LiteLLM's `model_prices_and_context_window.json` — never tokenizer estimates.
 - **All major modalities priced correctly**: input, output, Anthropic prompt-cache write / 5-min read / 1-hour read, OpenAI cached input, Gemini context cache, reasoning / extended thinking, image, audio.
 - **Streaming-safe** usage capture: Anthropic `message_delta`, OpenAI `stream_options.include_usage` (auto-injected), Gemini `usageMetadata`.
-- **One-command install** for laptop use: `pipx install tokview && tokview start`. No Docker. No Postgres.
+- **One-command install** for laptop use: `pipx install token-viewer && tokview start`. No Docker. No Postgres.
 - **Branded dashboard** on `http://localhost:3000`: live cost ticker (SSE), breakdowns by provider / model / session / tag / user-agent / time range, drill-down, "missing pricing" guardrail, cache-savings panel.
 - **Persistent storage** in `~/.tokview/db.sqlite` (WAL); survives restarts; CSV export.
 - **"tokview" branding everywhere user-facing.** LiteLLM remains an internal dependency, never visible to end users.
@@ -97,7 +97,7 @@ The CustomLogger writes per-request rows; the FastAPI app reads aggregates from 
 | Frontend | **SvelteKit** (static build) | Small bundle, easy to embed as static, dashboard-friendly. |
 | Charts | **Apache ECharts** via `svelte-echarts` | Best-in-class for time-series + categorical; lighter than Plotly. |
 | Live updates | **Server-Sent Events** | Browser-native, fits cost-ticker pattern, simpler than WebSockets. |
-| Distribution | **`pipx install tokview`** + `tokview` CLI | One command. Brew formula later. |
+| Distribution | **`pipx install token-viewer`** + `tokview` CLI | One command. Brew formula later. |
 
 ---
 
@@ -269,7 +269,7 @@ On reconnect after a network blip, the SPA re-issues `/api/calls?since=<last_see
 ### 6.1 Install + start
 
 ```
-$ pipx install tokview
+$ pipx install token-viewer
 $ tokview start
 ```
 

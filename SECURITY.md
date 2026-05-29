@@ -37,7 +37,7 @@ tokview's stance, by design:
 ## What tokview does NOT defend against
 
 - **A compromised local machine.** If an attacker has shell on your laptop, they can read `~/.tokview/db.sqlite` (and your shell env, which has your API keys). tokview doesn't encrypt SQLite at rest.
-- **A malicious LiteLLM RCE released via PyPI.** Soft pinning means new minors arrive on `pipx upgrade`. If you need stricter determinism, pin tokview exactly (`pipx install tokview==0.0.1`).
+- **A malicious LiteLLM RCE released via PyPI.** Soft pinning means new minors arrive on `pipx upgrade`. If you need stricter determinism, pin tokview exactly (`pipx install token-viewer==0.0.2`).
 - **MITM on `pip install`.** Use a trusted PyPI mirror and verify the downloaded wheel's hash matches PyPI's published hash.
 
 ## Encryption at rest (planned)
