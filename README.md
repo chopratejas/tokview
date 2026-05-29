@@ -57,6 +57,7 @@ Every Claude Code interaction lands in the dashboard.
 - $ spent today / this week / month-to-date, updating live via SSE — no refresh
 - Per-provider, per-model, per-session, per-tag breakdowns
 - **Session waterfall** — click any session to see every call in it on a timeline, with cost, tokens, latency and TTFT (a trace view for your agent loops)
+- **Per-tool tokens** — for agent sessions, which tools were called (`Read`, `Bash`, `mcp__…`) and how many tokens each consumed (arguments + results). Token estimates only — catches the big hidden cost: a large tool result re-sent as input on every later turn.
 - **Savings coach** — deterministic, local tips: repeated prompts you could cache, caching savings already realized, cheaper-model what-ifs. No model is called to produce these; it's arithmetic over your own data.
 - **Latency & TTFT** — time-to-first-token, total latency, and tokens/sec per model (p50/p95), plus per-call in the live tail
 - Cache-hit visibility (Anthropic prompt caching, OpenAI cached input tokens, Gemini context cache) and reasoning-token costs (o-series, Claude extended thinking)

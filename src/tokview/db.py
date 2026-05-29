@@ -88,6 +88,22 @@ CREATE TABLE IF NOT EXISTS kv (
     v          TEXT NOT NULL,
     updated_ms INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS tool_calls (
+    tool_call_id   TEXT PRIMARY KEY,          -- provider tool id; dedupes re-sends across turns
+    request_id     TEXT,                      -- the LLM call where this pair was first observed
+    session_id     TEXT,
+    ts_ms          INTEGER NOT NULL,
+    provider       TEXT,
+    model          TEXT,
+    tool_name      TEXT NOT NULL,
+    arg_tokens     INTEGER NOT NULL DEFAULT 0,
+    result_tokens  INTEGER NOT NULL DEFAULT 0,
+    total_tokens   INTEGER NOT NULL DEFAULT 0  -- token estimates only; never cost (see tools.py)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_session ON tool_calls(session_id);
+CREATE INDEX IF NOT EXISTS idx_tool_name    ON tool_calls(tool_name);
 """
 
 # Columns the writer is allowed to set on INSERT (order matters for the SQL builder).
@@ -331,6 +347,48 @@ class Database:
             (session_id, limit),
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
+
+    # ---- tool calls -------------------------------------------------------
+
+    async def insert_tool_calls(self, rows: list[dict[str, Any]]) -> None:
+        """INSERT OR IGNORE tool-call rows. Keyed on tool_call_id so the same
+        call re-sent on later turns is recorded exactly once."""
+        if not rows:
+            return
+        sql = (
+            "INSERT OR IGNORE INTO tool_calls "
+            "(tool_call_id, request_id, session_id, ts_ms, provider, model, "
+            " tool_name, arg_tokens, result_tokens, total_tokens) "
+            "VALUES (:tool_call_id, :request_id, :session_id, :ts_ms, :provider, :model, "
+            " :tool_name, :arg_tokens, :result_tokens, :total_tokens)"
+        )
+        async with self._lock:
+            await self.conn.executemany(sql, rows)
+            await self.conn.commit()
+
+    async def session_tool_breakdown(self, session_id: str) -> list[dict[str, Any]]:
+        """Per-tool token totals for one session (token estimates only)."""
+        async with self.conn.execute(
+            """
+            SELECT
+                tool_name,
+                COUNT(*)                          AS calls,
+                COALESCE(SUM(arg_tokens), 0)      AS arg_tokens,
+                COALESCE(SUM(result_tokens), 0)   AS result_tokens,
+                COALESCE(SUM(total_tokens), 0)    AS total_tokens
+            FROM tool_calls
+            WHERE session_id = ?
+            GROUP BY tool_name
+            ORDER BY total_tokens DESC
+            """,
+            (session_id,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def count_tool_calls(self) -> int:
+        async with self.conn.execute("SELECT COUNT(*) FROM tool_calls") as cur:
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
 
     async def latency_percentiles(self, since_ms: int, until_ms: int) -> list[dict[str, Any]]:
         """Per-model latency + TTFT percentiles (p50/p95) over a window.

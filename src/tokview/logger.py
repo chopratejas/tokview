@@ -15,8 +15,16 @@ from typing import Any
 from litellm.integrations.custom_logger import CustomLogger
 
 from .db import Database
+from .tools import parse_completed_tool_calls
 
 logger = logging.getLogger(__name__)
+
+
+def _litellm_count_tokens(model: str, text: str) -> int:
+    """Token count via LiteLLM's per-model tokenizer (unified across providers)."""
+    from litellm import token_counter
+
+    return int(token_counter(model=model, text=text))
 
 
 class TokviewLogger(CustomLogger):
@@ -27,6 +35,11 @@ class TokviewLogger(CustomLogger):
         self.db = db
         # pubsub plugs in for SSE in iter 4; keep optional for now
         self.pubsub = pubsub
+        # Tool-call IDs already recorded this process. The full conversation is
+        # re-sent every turn, so without this we'd re-tokenize the same (growing)
+        # tool results on every call — O(n^2) over a session. The DB also dedupes
+        # via INSERT OR IGNORE; this just avoids the wasted tokenization.
+        self._seen_tool_ids: set[str] = set()
 
     # ---- success ----------------------------------------------------------
 
@@ -42,8 +55,44 @@ class TokviewLogger(CustomLogger):
             await self.db.insert_request(row)
             if self.pubsub is not None:
                 await self.pubsub.publish({"event": "spend", "row": row})
+            await self._record_tool_calls(kwargs, row)
         except Exception:
             logger.exception("tokview: failed to log success event")
+
+    async def _record_tool_calls(self, kwargs: dict[str, Any], row: dict[str, Any]) -> None:
+        """Parse completed tool calls from the request messages and persist them.
+
+        Token estimates only — never cost (the provider bills per call, not per
+        block, and cache discounts make per-block cost meaningless)."""
+        try:
+            parsed = parse_completed_tool_calls(
+                kwargs.get("messages"), row["model"], _litellm_count_tokens
+            )
+        except Exception:
+            logger.exception("tokview: tool-call parse failed")
+            return
+
+        new = [p for p in parsed if p["id"] not in self._seen_tool_ids]
+        if not new:
+            return
+        tool_rows: list[dict[str, Any]] = []
+        for p in new:
+            self._seen_tool_ids.add(p["id"])
+            tool_rows.append(
+                {
+                    "tool_call_id": p["id"],
+                    "request_id": row["request_id"],
+                    "session_id": row.get("session_id"),
+                    "ts_ms": row["ts_ms"],
+                    "provider": row.get("provider"),
+                    "model": row.get("model"),
+                    "tool_name": p["name"],
+                    "arg_tokens": p["arg_tokens"],
+                    "result_tokens": p["result_tokens"],
+                    "total_tokens": p["arg_tokens"] + p["result_tokens"],
+                }
+            )
+        await self.db.insert_tool_calls(tool_rows)
 
     # Sync variant for codepaths that don't await the async hook.
     def log_success_event(

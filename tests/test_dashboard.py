@@ -23,6 +23,13 @@ def client(tmp_path):
     asyncio.get_event_loop().run_until_complete(
         db.insert_request(_row(request_id="r-fail", provider="openai", cost_usd=0, status_code=500, completed=0))
     )
+    asyncio.get_event_loop().run_until_complete(
+        db.insert_tool_calls([
+            {"tool_call_id": "tc-1", "request_id": "r-success", "session_id": "sess-1",
+             "ts_ms": 1, "provider": "anthropic", "model": "claude-3-5-sonnet",
+             "tool_name": "Read", "arg_tokens": 5, "result_tokens": 200, "total_tokens": 205},
+        ])
+    )
     pubsub = PubSub()
     app = build_app(db=db, pubsub=pubsub)
     with TestClient(app) as c:
@@ -94,6 +101,12 @@ def test_session_detail_returns_waterfall(client):
     assert body["summary"]["errors"] == 1
     assert body["summary"]["span_ms"] >= 0
     assert isinstance(body["insights"], list)
+    # per-tool token breakdown (token estimates only, no cost)
+    tools = {t["tool_name"]: t for t in body["tools"]}
+    assert tools["Read"]["calls"] == 1
+    assert tools["Read"]["result_tokens"] == 200
+    assert tools["Read"]["total_tokens"] == 205
+    assert "cost_usd" not in tools["Read"]  # tokens only
 
 
 def test_session_detail_unknown_session_is_empty(client):

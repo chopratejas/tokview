@@ -170,10 +170,12 @@ def build_app(db: Database, pubsub: PubSub | None = None) -> FastAPI:
 
     @app.get("/api/sessions/{session_id}")
     async def session_detail(session_id: str) -> JSONResponse:
-        """One session as a waterfall: ordered calls + summary + model what-if."""
+        """One session: ordered calls + summary + model what-if + per-tool tokens."""
         calls = await db.session_calls(session_id)
         if not calls:
-            return JSONResponse({"session_id": session_id, "calls": [], "summary": None, "insights": []})
+            return JSONResponse(
+                {"session_id": session_id, "calls": [], "summary": None, "insights": [], "tools": []}
+            )
 
         starts = [c["start_ms"] or c["ts_ms"] for c in calls]
         ends = [c["ts_ms"] for c in calls]
@@ -190,7 +192,16 @@ def build_app(db: Database, pubsub: PubSub | None = None) -> FastAPI:
             "models": sorted({c["model"] for c in calls if c["model"]}),
         }
         whatif = model_whatif(calls, app.state.pricing)
-        return JSONResponse({"session_id": session_id, "calls": calls, "summary": summary, "insights": whatif})
+        tools = await db.session_tool_breakdown(session_id)
+        return JSONResponse(
+            {
+                "session_id": session_id,
+                "calls": calls,
+                "summary": summary,
+                "insights": whatif,
+                "tools": tools,
+            }
+        )
 
     @app.get("/api/insights")
     async def insights() -> JSONResponse:

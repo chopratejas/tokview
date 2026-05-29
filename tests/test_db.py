@@ -178,6 +178,39 @@ async def test_by_provider_includes_failures_for_visibility(db: Database):
     assert by_p["anthropic"]["requests"] == 1
 
 
+def _tool_row(**ov):
+    base = {
+        "tool_call_id": "tc-1", "request_id": "r-1", "session_id": "s1",
+        "ts_ms": _now_ms(), "provider": "anthropic", "model": "claude-3-5-sonnet",
+        "tool_name": "Read", "arg_tokens": 5, "result_tokens": 100, "total_tokens": 105,
+    }
+    base.update(ov)
+    return base
+
+
+async def test_tool_calls_insert_and_dedup(db: Database):
+    await db.insert_tool_calls([_tool_row(tool_call_id="a")])
+    await db.insert_tool_calls([_tool_row(tool_call_id="a")])  # re-sent next turn
+    assert await db.count_tool_calls() == 1  # INSERT OR IGNORE dedupes by id
+
+
+async def test_session_tool_breakdown(db: Database):
+    await db.insert_tool_calls([
+        _tool_row(tool_call_id="a", tool_name="Read", result_tokens=100, total_tokens=105),
+        _tool_row(tool_call_id="b", tool_name="Read", result_tokens=200, total_tokens=205),
+        _tool_row(tool_call_id="c", tool_name="mcp__gh__search", result_tokens=500, total_tokens=510),
+        _tool_row(tool_call_id="d", session_id="other", tool_name="Bash", total_tokens=999),
+    ])
+    out = await db.session_tool_breakdown("s1")
+    by = {t["tool_name"]: t for t in out}
+    assert by["Read"]["calls"] == 2
+    assert by["Read"]["result_tokens"] == 300
+    assert by["mcp__gh__search"]["total_tokens"] == 510
+    assert "Bash" not in by  # belongs to a different session
+    # ordered by total_tokens desc -> mcp first
+    assert out[0]["tool_name"] == "mcp__gh__search"
+
+
 async def test_session_calls_ordered_oldest_first(db: Database):
     now = _now_ms()
     await db.insert_request(_row(request_id="c2", session_id="s", ts_ms=now + 100))

@@ -443,6 +443,33 @@
           {/each}
         </div>
 
+        {#if waterfall.tools && waterfall.tools.length > 0}
+          {@const maxTool = Math.max(...waterfall.tools.map((t) => t.total_tokens), 1)}
+          <div class="tools-section">
+            <h4>Tools used · token estimates</h4>
+            <table class="tools-table">
+              <thead>
+                <tr><th>tool</th><th class="num">calls</th><th class="num">args</th><th class="num">results</th><th class="num">total tokens</th></tr>
+              </thead>
+              <tbody>
+                {#each waterfall.tools as t}
+                  <tr>
+                    <td title={t.tool_name}>{truncate(t.tool_name, 30)}</td>
+                    <td class="num">{fmtNum(t.calls)}</td>
+                    <td class="num muted">{fmtNum(t.arg_tokens)}</td>
+                    <td class="num">{fmtNum(t.result_tokens)}</td>
+                    <td class="num">
+                      <span class="tok-bar" style="width: {(t.total_tokens / maxTool) * 100}%"></span>
+                      <span class="tok-val">{fmtNum(t.total_tokens)}</span>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+            <div class="tools-note">Estimated by tokenizing each tool's argument and result blocks — not provider-billed (cache discounts make per-tool cost meaningless).</div>
+          </div>
+        {/if}
+
         {#if waterfall.insights && waterfall.insights.length > 0}
           <div class="sheet-insights">
             {#each waterfall.insights as ins}
@@ -702,4 +729,29 @@
   .wf-ttft { display: block; height: 100%; background: rgba(255, 255, 255, 0.25); }
   .wf-cost { font-family: var(--mono); font-size: 11px; color: var(--accent-2); text-align: right; }
   .sheet-insights { margin-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+
+  /* ---- per-tool token breakdown ---- */
+  .tools-section { margin-top: 20px; }
+  .tools-section h4 {
+    margin: 0 0 8px 0;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .tools-table { width: 100%; }
+  .tools-table td.num { position: relative; }
+  .tok-bar {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 14px;
+    background: rgba(124, 92, 255, 0.18);
+    border-radius: 3px;
+    z-index: 0;
+  }
+  .tok-val { position: relative; z-index: 1; }
+  .tools-note { font-size: 10px; color: var(--text-dim); margin-top: 8px; font-style: italic; }
 </style>
