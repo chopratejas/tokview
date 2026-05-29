@@ -3,7 +3,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "tokview"
+# PyPI distribution name. The CLI command, import package, and repo are all
+# `tokview`; PyPI rejects `tokview` as too similar to an existing project, so
+# the install name is `token-viewer` (like `pip install pillow` -> `import PIL`).
+name = "token-viewer"
 version = "0.0.1"
 description = "A small, local token viewer for LLM API calls. Runs a tiny proxy on your laptop; shows the exact cost of every Claude / OpenAI / Gemini call in a dashboard. That's it."
 readme = "README.md"
