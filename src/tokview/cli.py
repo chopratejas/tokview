@@ -1,14 +1,14 @@
-"""`htv` command-line interface.
+"""`tokview` command-line interface.
 
 Commands:
-    htv start [--foreground] [--allow-remote]
-    htv stop
-    htv status
-    htv logs [--tail]
-    htv export --since YYYY-MM-DD [--format csv|json]
-    htv reset [--yes]
-    htv version
-    htv config-path
+    tokview start [--foreground] [--allow-remote]
+    tokview stop
+    tokview status
+    tokview logs [--tail]
+    tokview export --since YYYY-MM-DD [--format csv|json]
+    tokview reset [--yes]
+    tokview version
+    tokview config-path
 """
 from __future__ import annotations
 
@@ -26,18 +26,18 @@ from pathlib import Path
 import click
 
 from . import __version__
-from .config import DEFAULT_CONFIG_PATH, DEFAULT_DIR, HtvConfig
+from .config import DEFAULT_CONFIG_PATH, DEFAULT_DIR, TokviewConfig
 from .config import load as load_config
 from .server import serve
 
 LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
 
-PID_FILE = DEFAULT_DIR / "htv.pid"
-LOG_FILE = DEFAULT_DIR / "htv.log"
+PID_FILE = DEFAULT_DIR / "tokview.pid"
+LOG_FILE = DEFAULT_DIR / "tokview.log"
 
 
-@click.group(help="Headroom Token View — drop-in LLM proxy and cost dashboard.")
-@click.version_option(version=__version__, prog_name="htv")
+@click.group(help="tokview — drop-in LLM proxy and cost dashboard.")
+@click.version_option(version=__version__, prog_name="tokview")
 def main() -> None:
     """Command group."""
 
@@ -57,26 +57,26 @@ def main() -> None:
 )
 def start(foreground: bool, allow_remote: bool) -> None:
     """Start the proxy and dashboard."""
-    htv = load_config()
+    tokview = load_config()
 
     # Trust boundary per spec §6.4: non-loopback bind requires both the config value
     # and the --allow-remote flag.
-    non_loopback = htv.proxy.bind not in LOOPBACK or htv.dashboard.bind not in LOOPBACK
+    non_loopback = tokview.proxy.bind not in LOOPBACK or tokview.dashboard.bind not in LOOPBACK
     if non_loopback and not allow_remote:
         raise click.ClickException(
-            f"Config requests a non-loopback bind (proxy.bind={htv.proxy.bind!r}, "
-            f"dashboard.bind={htv.dashboard.bind!r}) but --allow-remote was not passed.\n"
+            f"Config requests a non-loopback bind (proxy.bind={tokview.proxy.bind!r}, "
+            f"dashboard.bind={tokview.dashboard.bind!r}) but --allow-remote was not passed.\n"
             "v1 has no authentication; team deploys belong on the Postgres+Docker path.\n"
-            "If you accept the risk, run: htv start --allow-remote"
+            "If you accept the risk, run: tokview start --allow-remote"
         )
 
     # If already running, refuse. We skip this check when we ARE the child
-    # the parent just spawned (HTV_INTERNAL_SPAWN=1).
-    if os.environ.get("HTV_INTERNAL_SPAWN") != "1":
+    # the parent just spawned (TOKVIEW_INTERNAL_SPAWN=1).
+    if os.environ.get("TOKVIEW_INTERNAL_SPAWN") != "1":
         pid = _read_pid()
         if pid and _pid_running(pid):
             raise click.ClickException(
-                f"htv is already running (pid={pid}). Use 'htv stop' first, or 'htv status'."
+                f"tokview is already running (pid={pid}). Use 'tokview stop' first, or 'tokview status'."
             )
 
     DEFAULT_DIR.mkdir(parents=True, exist_ok=True)
@@ -85,7 +85,7 @@ def start(foreground: bool, allow_remote: bool) -> None:
         # Self-spawn in foreground, detached. Avoids os.fork weirdness on macOS
         # and keeps the asyncio loop entirely in the child process.
         env = dict(os.environ)
-        env["HTV_INTERNAL_SPAWN"] = "1"
+        env["TOKVIEW_INTERNAL_SPAWN"] = "1"
         log_fh = LOG_FILE.open("ab")
         child = subprocess.Popen(
             [sys.argv[0], "start", "--foreground"] + (["--allow-remote"] if allow_remote else []),
@@ -97,21 +97,21 @@ def start(foreground: bool, allow_remote: bool) -> None:
             env=env,
         )
         PID_FILE.write_text(str(child.pid))
-        proxy_url = f"http://{htv.proxy.bind}:{htv.proxy.port}"
-        dash_url = f"http://{htv.dashboard.bind}:{htv.dashboard.port}"
-        click.echo(_banner_running(htv, child.pid))
+        proxy_url = f"http://{tokview.proxy.bind}:{tokview.proxy.port}"
+        dash_url = f"http://{tokview.dashboard.bind}:{tokview.dashboard.port}"
+        click.echo(_banner_running(tokview, child.pid))
         click.echo(f"\nLogs: {LOG_FILE}\nProxy: {proxy_url}\nDashboard: {dash_url}")
         return
 
     # Foreground path. If we're the spawned child, our PID is already in the
     # PID file (parent wrote it). Make sure it points to *us* in case the
     # parent's child-PID guess was wrong.
-    if os.environ.get("HTV_INTERNAL_SPAWN") == "1":
+    if os.environ.get("TOKVIEW_INTERNAL_SPAWN") == "1":
         PID_FILE.write_text(str(os.getpid()))
 
-    _print_banner(htv)
+    _print_banner(tokview)
     try:
-        asyncio.run(serve(htv))
+        asyncio.run(serve(tokview))
     except KeyboardInterrupt:
         click.echo("\nstopped.")
     finally:
@@ -127,12 +127,12 @@ def start(foreground: bool, allow_remote: bool) -> None:
 
 @main.command()
 def stop() -> None:
-    """Stop a running htv process."""
+    """Stop a running tokview process."""
     pid = _read_pid()
     if not pid:
         raise click.ClickException("no PID file found at " + str(PID_FILE))
     if not _pid_running(pid):
-        click.echo(f"htv was not running (stale PID {pid}); cleaning up.")
+        click.echo(f"tokview was not running (stale PID {pid}); cleaning up.")
         PID_FILE.unlink(missing_ok=True)
         return
     try:
@@ -145,7 +145,7 @@ def stop() -> None:
     for _ in range(50):
         if not _pid_running(pid):
             PID_FILE.unlink(missing_ok=True)
-            click.echo(f"htv stopped (pid {pid}).")
+            click.echo(f"tokview stopped (pid {pid}).")
             return
         time.sleep(0.1)
     # Forced
@@ -159,23 +159,23 @@ def stop() -> None:
 
 @main.command()
 def status() -> None:
-    """Report whether htv is running and surface diagnostics."""
+    """Report whether tokview is running and surface diagnostics."""
     pid = _read_pid()
     running = bool(pid and _pid_running(pid))
-    htv = load_config()
-    click.echo(f"htv {__version__}: " + ("RUNNING" if running else "STOPPED"))
+    tokview = load_config()
+    click.echo(f"tokview {__version__}: " + ("RUNNING" if running else "STOPPED"))
     if pid:
         click.echo(f"  pid:       {pid}")
     click.echo(f"  config:    {DEFAULT_CONFIG_PATH}")
-    click.echo(f"  storage:   {htv.storage.path}")
-    click.echo(f"  proxy:     http://{htv.proxy.bind}:{htv.proxy.port}")
-    click.echo(f"  dashboard: http://{htv.dashboard.bind}:{htv.dashboard.port}")
+    click.echo(f"  storage:   {tokview.storage.path}")
+    click.echo(f"  proxy:     http://{tokview.proxy.bind}:{tokview.proxy.port}")
+    click.echo(f"  dashboard: http://{tokview.dashboard.bind}:{tokview.dashboard.port}")
     if running:
         # Fetch diagnostics if we can — quick HTTP call
         try:
             import httpx
 
-            r = httpx.get(f"http://{htv.dashboard.bind}:{htv.dashboard.port}/api/diagnostics", timeout=2.0)
+            r = httpx.get(f"http://{tokview.dashboard.bind}:{tokview.dashboard.port}/api/diagnostics", timeout=2.0)
             if r.status_code == 200:
                 d = r.json()
                 m = d.get("metrics", {})
@@ -193,7 +193,7 @@ def status() -> None:
 @click.option("--tail", "-f", is_flag=True, help="Follow the log instead of printing it.")
 @click.option("--lines", "-n", type=int, default=100, help="Number of lines to print (default 100).")
 def logs(tail: bool, lines: int) -> None:
-    """Show the htv server logs."""
+    """Show the tokview server logs."""
     if not LOG_FILE.exists():
         click.echo(f"no log file at {LOG_FILE}")
         return
@@ -209,7 +209,7 @@ def logs(tail: bool, lines: int) -> None:
 @click.option("--format", "fmt", type=click.Choice(["csv", "json"]), default="csv", help="Output format.")
 def export(since: str, fmt: str) -> None:
     """Dump request rows to stdout."""
-    htv = load_config()
+    tokview = load_config()
     # Parse since
     try:
         since_ms = int(since) if since.isdigit() else int(
@@ -220,7 +220,7 @@ def export(since: str, fmt: str) -> None:
 
     import sqlite3
 
-    con = sqlite3.connect(str(htv.storage.path))
+    con = sqlite3.connect(str(tokview.storage.path))
     con.row_factory = sqlite3.Row
     rows = con.execute(
         "SELECT * FROM requests WHERE ts_ms >= ? ORDER BY ts_ms ASC",
@@ -240,13 +240,13 @@ def export(since: str, fmt: str) -> None:
 @main.command()
 @click.option("--yes", is_flag=True, help="Skip confirmation.")
 def reset(yes: bool) -> None:
-    """Wipe the SQLite database. Stops htv first if running."""
-    htv = load_config()
+    """Wipe the SQLite database. Stops tokview first if running."""
+    tokview = load_config()
     if not yes:
-        click.confirm(f"This will delete {htv.storage.path}. Continue?", abort=True)
+        click.confirm(f"This will delete {tokview.storage.path}. Continue?", abort=True)
     pid = _read_pid()
     if pid and _pid_running(pid):
-        click.echo("Stopping htv before reset...")
+        click.echo("Stopping tokview before reset...")
         try:
             os.kill(pid, signal.SIGTERM)
             for _ in range(50):
@@ -257,16 +257,16 @@ def reset(yes: bool) -> None:
             pass
         PID_FILE.unlink(missing_ok=True)
     for suffix in ("", "-journal", "-wal", "-shm"):
-        p = Path(str(htv.storage.path) + suffix)
+        p = Path(str(tokview.storage.path) + suffix)
         if p.exists():
             p.unlink()
-    click.echo(f"deleted {htv.storage.path} (+wal/journal sidecars).")
+    click.echo(f"deleted {tokview.storage.path} (+wal/journal sidecars).")
 
 
 @main.command()
 def version() -> None:
     """Print the version and exit."""
-    click.echo(f"headroom-token-view {__version__}")
+    click.echo(f"tokview {__version__}")
 
 
 @main.command(name="config-path")
@@ -297,22 +297,26 @@ def _pid_running(pid: int) -> bool:
     return True
 
 
-def _banner_running(htv: HtvConfig, pid: int) -> str:
-    return f"""+-{'-' * 72}-+
-| Headroom Token View v{__version__:<54}|
-|                                                                          |
-|   started in background (pid {pid:<6})                                       |
-|   stop with:    htv stop                                                 |
-|   status:       htv status                                               |
-+-{'-' * 72}-+"""
-
-
-def _print_banner(htv: HtvConfig) -> None:
-    proxy_url = f"http://{htv.proxy.bind}:{htv.proxy.port}"
-    dash_url = f"http://{htv.dashboard.bind}:{htv.dashboard.port}"
+def _banner_running(tokview: TokviewConfig, pid: int) -> str:
     width = 74
     lines = [
-        "Headroom Token View v" + __version__,
+        f"tokview v{__version__}",
+        "",
+        f"  started in background (pid {pid})",
+        "  stop with:  tokview stop",
+        "  status:     tokview status",
+    ]
+    bar = "+" + "-" * (width - 2) + "+"
+    body = "\n".join("| " + ln.ljust(width - 4) + " |" for ln in lines)
+    return f"{bar}\n{body}\n{bar}"
+
+
+def _print_banner(tokview: TokviewConfig) -> None:
+    proxy_url = f"http://{tokview.proxy.bind}:{tokview.proxy.port}"
+    dash_url = f"http://{tokview.dashboard.bind}:{tokview.dashboard.port}"
+    width = 74
+    lines = [
+        "tokview v" + __version__,
         "",
         f"  Proxy     {proxy_url}",
         f"  Dashboard {dash_url}",

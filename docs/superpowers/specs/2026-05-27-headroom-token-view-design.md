@@ -1,8 +1,8 @@
-# Headroom Token View — v1 Design
+# tokview — v1 Design
 
 > **Status:** Draft for review · **Author:** Tejas Chopra · **Date:** 2026-05-27
 
-A single-binary-feeling LLM proxy + dashboard that tracks **exact** token usage and cost across Claude, OpenAI, Gemini, and any other provider LiteLLM supports. v1 ships as `pipx install headroom-token-view && htv start` for solo laptop use; the same codebase grows into a team / SaaS deployment ("🅑") with a config change, not a rewrite.
+A single-binary-feeling LLM proxy + dashboard that tracks **exact** token usage and cost across Claude, OpenAI, Gemini, and any other provider LiteLLM supports. v1 ships as `pipx install tokview && tokview start` for solo laptop use; the same codebase grows into a team / SaaS deployment ("🅑") with a config change, not a rewrite.
 
 ---
 
@@ -13,14 +13,14 @@ A single-binary-feeling LLM proxy + dashboard that tracks **exact** token usage 
 - **Exact cost** per request, from the provider's returned `usage` field (ground truth), priced via LiteLLM's `model_prices_and_context_window.json` — never tokenizer estimates.
 - **All major modalities priced correctly**: input, output, Anthropic prompt-cache write / 5-min read / 1-hour read, OpenAI cached input, Gemini context cache, reasoning / extended thinking, image, audio.
 - **Streaming-safe** usage capture: Anthropic `message_delta`, OpenAI `stream_options.include_usage` (auto-injected), Gemini `usageMetadata`.
-- **One-command install** for laptop use: `pipx install headroom-token-view && htv start`. No Docker. No Postgres.
+- **One-command install** for laptop use: `pipx install tokview && tokview start`. No Docker. No Postgres.
 - **Branded dashboard** on `http://localhost:3000`: live cost ticker (SSE), breakdowns by provider / model / session / tag / user-agent / time range, drill-down, "missing pricing" guardrail, cache-savings panel.
-- **Persistent storage** in `~/.headroom-token-view/db.sqlite` (WAL); survives restarts; CSV export.
-- **"Headroom Token View" branding everywhere user-facing.** LiteLLM remains an internal dependency, never visible to end users.
+- **Persistent storage** in `~/.tokview/db.sqlite` (WAL); survives restarts; CSV export.
+- **"tokview" branding everywhere user-facing.** LiteLLM remains an internal dependency, never visible to end users.
 
 ### v1 explicitly does NOT include (deferred to 🅑 / v1.5+)
 - Multi-user authentication
-- Virtual keys (Headroom-issued keys with mapped provider keys)
+- Virtual keys (tokview-issued keys with mapped provider keys)
 - Per-user / per-team budgets and alerts
 - Multi-tenancy / SaaS
 - Response caching at the proxy layer
@@ -38,12 +38,12 @@ Selected over:
 - 🅑: docker-compose + Postgres — adds friction the solo user does not need.
 - 🅒: Rust sidecar for byte forwarding — premature optimization at laptop scale (network call dominates proxy overhead).
 
-The reasoning: at laptop QPS, LiteLLM's Python overhead is negligible (single-digit ms versus ~200ms to providers). SQLite is safe because LiteLLM runs in **stateless gateway mode** (no DB-backed virtual keys / budgets in v1), so the budget-decrement race that drives LiteLLM's "Postgres required" guidance does not apply. HTV owns all writes and emits append-only inserts; WAL handles concurrency.
+The reasoning: at laptop QPS, LiteLLM's Python overhead is negligible (single-digit ms versus ~200ms to providers). SQLite is safe because LiteLLM runs in **stateless gateway mode** (no DB-backed virtual keys / budgets in v1), so the budget-decrement race that drives LiteLLM's "Postgres required" guidance does not apply. tokview owns all writes and emits append-only inserts; WAL handles concurrency.
 
 ### 2.2 Components (all in one Python process)
 
 ```
-┌─ headroom-token-view (single process) ─────────────────────────────────────────┐
+┌─ tokview (single process) ─────────────────────────────────────────┐
 │                                                                                │
 │  ┌─ LiteLLM Proxy  (port 4000) ──────────────────────────────────────────┐    │
 │  │ accepts: /v1/messages, /v1/chat/completions, /v1beta/.../generateContent│    │
@@ -53,7 +53,7 @@ The reasoning: at laptop QPS, LiteLLM's Python overhead is negligible (single-di
 │  └────────────────┬───────────────────────────────────────────────────────┘    │
 │                   │ async event                                                │
 │                   ▼                                                            │
-│  ┌─ HTV CustomLogger ────────────────────────────────────────────────────┐    │
+│  ┌─ tokview CustomLogger ────────────────────────────────────────────────────┐    │
 │  │ normalize StandardLoggingPayload → row dict                            │    │
 │  │ INSERT INTO requests (batched, ≤50 rows or 100ms)                      │    │
 │  │ publish to in-process pub/sub (asyncio.Queue per subscriber)           │    │
@@ -65,13 +65,13 @@ The reasoning: at laptop QPS, LiteLLM's Python overhead is negligible (single-di
 │  │ Static /            ◄── serves the embedded SvelteKit SPA              │    │
 │  └────────────────┬───────────────────────────────────────────────────────┘    │
 │                   ▼                                                            │
-│  ┌─ Embedded SvelteKit SPA  "Headroom Token View" ───────────────────────┐    │
+│  ┌─ Embedded SvelteKit SPA  "tokview" ───────────────────────┐    │
 │  │ built once, bundled via Python package_data, served as static assets   │    │
 │  │ consumes SSE for live updates + REST for backfill                      │    │
 │  │ charts via Apache ECharts (svelte-echarts)                             │    │
 │  └────────────────────────────────────────────────────────────────────────┘    │
 │                                                                                │
-│  ┌─ SQLite  (~/.headroom-token-view/db.sqlite, WAL) ─────────────────────┐    │
+│  ┌─ SQLite  (~/.tokview/db.sqlite, WAL) ─────────────────────┐    │
 │  │ tables: requests, daily_rollup, kv (config)                            │    │
 │  └────────────────────────────────────────────────────────────────────────┘    │
 └────────────────────────────────────────────────────────────────────────────────┘
@@ -85,7 +85,7 @@ The CustomLogger writes per-request rows; the FastAPI app reads aggregates from 
 - A single Python process hosts: LiteLLM Proxy (uvicorn worker), the FastAPI dashboard backend, and serves the SPA static assets.
 - LiteLLM and FastAPI run on **separate ports** (4000 and 3000) so dashboards can be exposed without exposing the proxy and vice-versa.
 - A thin `multiprocessing` supervisor restarts the inner workers on crash.
-- Foreground (`htv start --no-daemon`) or background (`htv start`, default).
+- Foreground (`tokview start --no-daemon`) or background (`tokview start`, default).
 
 ### 2.5 Stack rationale
 
@@ -97,14 +97,14 @@ The CustomLogger writes per-request rows; the FastAPI app reads aggregates from 
 | Frontend | **SvelteKit** (static build) | Small bundle, easy to embed as static, dashboard-friendly. |
 | Charts | **Apache ECharts** via `svelte-echarts` | Best-in-class for time-series + categorical; lighter than Plotly. |
 | Live updates | **Server-Sent Events** | Browser-native, fits cost-ticker pattern, simpler than WebSockets. |
-| Distribution | **`pipx install headroom-token-view`** + `htv` CLI | One command. Brew formula later. |
+| Distribution | **`pipx install tokview`** + `tokview` CLI | One command. Brew formula later. |
 
 ---
 
 ## 3. Request Lifecycle
 
 ```
-client                  HTV proxy :4000              provider                 dashboard :3000
+client                  tokview proxy :4000              provider                 dashboard :3000
 ──────                  ───────────────              ────────                 ───────────────
   │ POST /v1/messages       │                            │                         │
   │ base_url=localhost:4000 │                            │                         │
@@ -219,7 +219,7 @@ CREATE TABLE kv (
 
 ```
 ╔════════════════════════════════════════════════════════════════════════════════════╗
-║  Headroom Token View                                                  ⚙  ●LIVE    ║
+║  tokview                                                  ⚙  ●LIVE    ║
 ╠════════════════════════════════════════════════════════════════════════════════════╣
 ║                                                                                    ║
 ║   TODAY                  THIS WEEK              MTD              CACHE SAVED       ║
@@ -269,18 +269,18 @@ On reconnect after a network blip, the SPA re-issues `/api/calls?since=<last_see
 ### 6.1 Install + start
 
 ```
-$ pipx install headroom-token-view
-$ htv start
+$ pipx install tokview
+$ tokview start
 ```
 
 First-run banner:
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  Headroom Token View v0.1.0                                              ║
+║  tokview v0.1.0                                              ║
 ║  ✓ Proxy:     http://localhost:4000                                      ║
 ║  ✓ Dashboard: http://localhost:3000                                      ║
-║  ✓ DB:        ~/.headroom-token-view/db.sqlite                           ║
+║  ✓ DB:        ~/.tokview/db.sqlite                           ║
 ║                                                                          ║
 ║  Point your apps at the proxy:                                           ║
 ║    Anthropic:    export ANTHROPIC_BASE_URL=http://localhost:4000         ║
@@ -292,12 +292,12 @@ First-run banner:
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
-### 6.2 Config (`~/.headroom-token-view/config.yaml`)
+### 6.2 Config (`~/.tokview/config.yaml`)
 
 ```yaml
 proxy:        { port: 4000, bind: 127.0.0.1 }
 dashboard:    { port: 3000, bind: 127.0.0.1 }
-storage:      { path: ~/.headroom-token-view/db.sqlite }
+storage:      { path: ~/.tokview/db.sqlite }
 litellm:
   always_include_stream_usage: true     # critical for OpenAI streams
 pricing:
@@ -312,25 +312,25 @@ capture:      { prompts: false, responses: false }
 
 | Command | Behavior |
 |---|---|
-| `htv start [--no-daemon]` | Start both services; daemonize by default. |
-| `htv stop` | Graceful shutdown. |
-| `htv status` | Up? since when? requests today? cost today? last error? |
-| `htv logs [--tail]` | Tail the combined log. |
-| `htv export --since YYYY-MM-DD [--format csv|json]` | Export requests. |
-| `htv reset --yes` | Wipe DB (interactive confirm required). |
+| `tokview start [--no-daemon]` | Start both services; daemonize by default. |
+| `tokview stop` | Graceful shutdown. |
+| `tokview status` | Up? since when? requests today? cost today? last error? |
+| `tokview logs [--tail]` | Tail the combined log. |
+| `tokview export --since YYYY-MM-DD [--format csv|json]` | Export requests. |
+| `tokview reset --yes` | Wipe DB (interactive confirm required). |
 
 ### 6.4 Trust boundary
 
 - Defaults bind to **`127.0.0.1`** only.
-- Provider API keys are read from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) by LiteLLM. Never persisted by HTV.
+- Provider API keys are read from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) by LiteLLM. Never persisted by tokview.
 - v1 has no auth on the dashboard — localhost-only.
-- The `proxy.bind` / `dashboard.bind` config keys *do* accept non-loopback addresses, but two conditions must **both** be satisfied: the config value is non-loopback AND the CLI is invoked with `htv start --allow-remote`. If the config requests a non-loopback bind without the flag, HTV refuses to start and prints a warning explaining that v1 has no authentication and team-deploys belong on the 🅑 path (auth + Postgres). The flag is an explicit operator acknowledgement; it does not override or silence the bind config — it only unlocks the config that's already there.
+- The `proxy.bind` / `dashboard.bind` config keys *do* accept non-loopback addresses, but two conditions must **both** be satisfied: the config value is non-loopback AND the CLI is invoked with `tokview start --allow-remote`. If the config requests a non-loopback bind without the flag, tokview refuses to start and prints a warning explaining that v1 has no authentication and team-deploys belong on the 🅑 path (auth + Postgres). The flag is an explicit operator acknowledgement; it does not override or silence the bind config — it only unlocks the config that's already there.
 
 ---
 
 ## 7. Privacy & Content Capture
 
-**Default: HTV stores only token counts + cost + metadata. No prompt or response text.**
+**Default: tokview stores only token counts + cost + metadata. No prompt or response text.**
 
 Rationale:
 - Anthropic prompts can run to hundreds of thousands of tokens — SQLite size balloons fast.
@@ -358,13 +358,13 @@ capture:
 | Scenario | Behavior |
 |---|---|
 | Provider 5xx / timeout | Forward upstream status & body verbatim. Row logged with `cost_usd=0`, `status_code`, `error_message`. Surfaced in **Errors** tab. |
-| **Client disconnect mid-stream** ([LiteLLM #14457](https://github.com/BerriAI/litellm/issues/14457)) | HTV detects the unclosed SSE stream. On disconnect: runs the provider's local tokenizer (Anthropic via `anthropic-tokenizer`, OpenAI via `tiktoken`) over `(prompt + chunks-received-so-far)` to estimate output tokens. Gemini ships no local tokenizer — its `count_tokens` is a remote endpoint, so HTV calls it with a **200 ms timeout** and on timeout/failure falls back to a `len(text)/4` char-based estimate. Either way, the row is stored with `completed=0`, `cost_estimated=1`, and the dashboard shows a ⚠ on estimated rows. The estimate is a best-effort placeholder; the source-of-truth remains the provider's eventual billed usage if a webhook or batch reconciliation ever exposes it. |
-| Unknown model / missing pricing ([incident 2026-01-27](https://docs.litellm.ai/blog/model-cost-map-incident)) | Guardrail: `total_tokens > 0 AND cost_usd = 0` → row flagged + dashboard alert *"Missing pricing for model X — update HTV or override in config."* |
+| **Client disconnect mid-stream** ([LiteLLM #14457](https://github.com/BerriAI/litellm/issues/14457)) | tokview detects the unclosed SSE stream. On disconnect: runs the provider's local tokenizer (Anthropic via `anthropic-tokenizer`, OpenAI via `tiktoken`) over `(prompt + chunks-received-so-far)` to estimate output tokens. Gemini ships no local tokenizer — its `count_tokens` is a remote endpoint, so tokview calls it with a **200 ms timeout** and on timeout/failure falls back to a `len(text)/4` char-based estimate. Either way, the row is stored with `completed=0`, `cost_estimated=1`, and the dashboard shows a ⚠ on estimated rows. The estimate is a best-effort placeholder; the source-of-truth remains the provider's eventual billed usage if a webhook or batch reconciliation ever exposes it. |
+| Unknown model / missing pricing ([incident 2026-01-27](https://docs.litellm.ai/blog/model-cost-map-incident)) | Guardrail: `total_tokens > 0 AND cost_usd = 0` → row flagged + dashboard alert *"Missing pricing for model X — update tokview or override in config."* |
 | Pricing-map staleness | Daily fetch of `model_prices_and_context_window.json` with SHA-256 verify; on malformed JSON, retain the last-known-good copy on disk. |
 | SQLite locked under burst | WAL + `busy_timeout=5000` + writes batched (≤50 rows or 100 ms flush). |
 | Wrong `base_url` in client → 404 | Dashboard **Health** tab shows last 10 4xx/5xx from clients for quick diagnosis. |
 | Disk fills | Retention sweeper deletes rows > `retention.days` daily. |
-| Process crash | `htv start` runs under a `multiprocessing` supervisor; restarts the inner workers on crash. |
+| Process crash | `tokview start` runs under a `multiprocessing` supervisor; restarts the inner workers on crash. |
 | Pricing override needed | `config.yaml` exposes `pricing.overrides` map (model → input/output/cache rates) layered on top of the cost map. |
 
 ---
@@ -377,7 +377,7 @@ capture:
 | **Streaming parser** | Recorded SSE fixtures from real provider responses (replayed via `pytest-httpx`); assert captured token counts == known-good. Edge cases: vLLM trailing usage ([#25389](https://github.com/BerriAI/litellm/issues/25389)), Anthropic `message_delta`, OpenAI `stream_options.include_usage`. |
 | **Disconnect handling** | Integration: client cancels mid-stream → row written with `completed=0`. For **Anthropic / OpenAI**, the tokenizer-based estimate must be within ±10% of the provider's actual usage (when usage is later observable in a retry). For **Gemini's char-based fallback** (used when `count_tokens` times out), the bound is looser: ±30% acceptable, since the fallback is "any signal is better than zero" rather than an accurate estimate. Tested separately per provider. |
 | **Dashboard SSE** | Playwright e2e: trigger a call → cost ticker increments within 1 s. |
-| **End-to-end smoke** | `HTV_E2E=1` gated test that hits each real provider once. Skipped in CI by default to preserve quota. |
+| **End-to-end smoke** | `TOKVIEW_E2E=1` gated test that hits each real provider once. Skipped in CI by default to preserve quota. |
 | **Pricing-map regression** | CI fetches latest cost map; warns on `>5%` price delta per model day-over-day (catches incidents like 2026-01-27). |
 
 ---
@@ -391,7 +391,7 @@ Designed so the v1 → 🅑 jump is **configuration, not a rewrite.**
 | Storage | SQLite | Postgres | Set `DATABASE_URL`; same DDL with type swaps. |
 | Process | One Python process | docker-compose | Same code split across containers. |
 | Auth | None (localhost only) | Magic-link / SSO | Add FastAPI auth middleware. |
-| Provider keys | Passthrough from env | Virtual keys (`htv-sk-…`) | Enable LiteLLM virtual-keys feature (DB-backed). |
+| Provider keys | Passthrough from env | Virtual keys (`tokview-sk-…`) | Enable LiteLLM virtual-keys feature (DB-backed). |
 | Tenancy | Single user | Multi-user / team | `team_id` column already present (nullable); add filters. |
 | Retention | 90 days | Configurable / unlimited | Already a config knob. |
 

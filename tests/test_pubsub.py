@@ -5,7 +5,7 @@ import asyncio
 
 import pytest
 
-from headroom_token_view.pubsub import PubSub
+from tokview.pubsub import PubSub
 
 pytestmark = pytest.mark.asyncio
 

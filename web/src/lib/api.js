@@ -31,6 +31,24 @@ export async function fetchSessions(limit = 20) {
   return r.json();
 }
 
+export async function fetchSessionDetail(sessionId) {
+  const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`);
+  if (!r.ok) throw new Error(`/api/sessions/${sessionId} -> ${r.status}`);
+  return r.json();
+}
+
+export async function fetchInsights() {
+  const r = await fetch('/api/insights');
+  if (!r.ok) throw new Error(`/api/insights -> ${r.status}`);
+  return r.json();
+}
+
+export async function fetchLatency() {
+  const r = await fetch('/api/latency');
+  if (!r.ok) throw new Error(`/api/latency -> ${r.status}`);
+  return r.json();
+}
+
 // SSE subscription helper. Returns the EventSource so the caller can close().
 export function subscribe(onSpend, onError) {
   const es = new EventSource('/api/events');

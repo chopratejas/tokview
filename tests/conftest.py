@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest_asyncio
 
-from headroom_token_view.db import Database
+from tokview.db import Database
 
 
 @pytest_asyncio.fixture

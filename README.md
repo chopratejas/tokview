@@ -1,4 +1,4 @@
-# headroom-token-view
+# tokview
 
 A small, local token viewer for LLM API calls.
 
@@ -6,28 +6,28 @@ It runs a tiny proxy on your laptop. Point your apps at it (one env var) and it 
 
 That's it. No accounts. No cloud. No Docker. One `pipx install`.
 
-[![CI](https://github.com/chopratejas/headroom-token-view/actions/workflows/ci.yml/badge.svg)](https://github.com/chopratejas/headroom-token-view/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/headroom-token-view.svg)](https://pypi.org/project/headroom-token-view/)
+[![CI](https://github.com/chopratejas/tokview/actions/workflows/ci.yml/badge.svg)](https://github.com/chopratejas/tokview/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/tokview.svg)](https://pypi.org/project/tokview/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
 ## Quick start
 
 ```bash
-pipx install headroom-token-view
-htv start
+pipx install tokview
+tokview start
 ```
 
 You'll see:
 
 ```
 +--------------------------------------------------------------------------+
-| Headroom Token View v0.0.1                                               |
+| tokview v0.0.1                                               |
 |                                                                          |
 |   started in background (pid 12345)                                      |
 +--------------------------------------------------------------------------+
 
-Logs: /Users/you/.headroom-token-view/htv.log
+Logs: /Users/you/.tokview/tokview.log
 Proxy: http://127.0.0.1:4000
 Dashboard: http://127.0.0.1:3000
 ```
@@ -54,19 +54,19 @@ Every Claude Code interaction lands in the dashboard.
 
 ## What it shows
 
-- $ spent today / this week / month-to-date
+- $ spent today / this week / month-to-date, updating live via SSE — no refresh
 - Per-provider, per-model, per-session, per-tag breakdowns
-- Cache hit visibility (Anthropic prompt caching, OpenAI cached input tokens, Gemini context cache)
-- Reasoning-token costs (o-series, Claude extended thinking)
-- A live tail of recent calls with status + latency
-- Real-time updates via SSE — no refresh needed
+- **Session waterfall** — click any session to see every call in it on a timeline, with cost, tokens, latency and TTFT (a trace view for your agent loops)
+- **Savings coach** — deterministic, local tips: repeated prompts you could cache, caching savings already realized, cheaper-model what-ifs. No model is called to produce these; it's arithmetic over your own data.
+- **Latency & TTFT** — time-to-first-token, total latency, and tokens/sec per model (p50/p95), plus per-call in the live tail
+- Cache-hit visibility (Anthropic prompt caching, OpenAI cached input tokens, Gemini context cache) and reasoning-token costs (o-series, Claude extended thinking)
 
 ## What it doesn't do (intentionally)
 
 - No team / multi-user features. Single user, localhost only.
 - No virtual API keys. Your real provider keys are read from env vars and forwarded straight to the provider.
 - No alerting / Slack integration. Not yet.
-- No data leaves your machine. Everything in `~/.headroom-token-view/db.sqlite`.
+- No data leaves your machine. Everything in `~/.tokview/db.sqlite`.
 - No prompt content stored by default. (Opt-in with redaction; see Privacy below.)
 
 Want any of these? Open an issue. The architecture is designed to evolve into a Postgres + Docker + auth setup later — see the design spec for the "🅑 path".
@@ -74,7 +74,7 @@ Want any of these? Open an issue. The architecture is designed to evolve into a 
 ## How it works
 
 ```
-Your apps ──► headroom-token-view ──► Provider APIs
+Your apps ──► tokview ──► Provider APIs
                        │
                        ├─ writes a row → SQLite
                        └─ pushes a spend event → SSE → Dashboard
@@ -87,29 +87,29 @@ Your SDK doesn't know it's talking to a proxy. The response bytes are forwarded 
 ## CLI
 
 ```
-htv start [-f]            start the proxy + dashboard (daemonizes; -f for foreground)
-htv stop                  graceful SIGTERM
-htv status                pid, uptime, request counts, errors, diagnostics
-htv logs [-f] [-n N]      tail the server log
-htv export --since DATE   csv/json dump of all calls since DATE
-htv reset                 wipe the SQLite database (with confirmation)
-htv version
-htv config-path
+tokview start [-f]            start the proxy + dashboard (daemonizes; -f for foreground)
+tokview stop                  graceful SIGTERM
+tokview status                pid, uptime, request counts, errors, diagnostics
+tokview logs [-f] [-n N]      tail the server log
+tokview export --since DATE   csv/json dump of all calls since DATE
+tokview reset                 wipe the SQLite database (with confirmation)
+tokview version
+tokview config-path
 ```
 
 ## Configuration
 
-`~/.headroom-token-view/config.yaml` is auto-generated on first start. Defaults are localhost-only on ports 3000 / 4000.
+`~/.tokview/config.yaml` is auto-generated on first start. Defaults are localhost-only on ports 3000 / 4000.
 
 ```yaml
 proxy:        { port: 4000, bind: 127.0.0.1 }
 dashboard:    { port: 3000, bind: 127.0.0.1 }
-storage:      { path: ~/.headroom-token-view/db.sqlite }
+storage:      { path: ~/.tokview/db.sqlite }
 retention:    { days: 90 }
 capture:      { prompts: false, responses: false }
 ```
 
-Provider API keys come from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`). HTV never reads or persists them.
+Provider API keys come from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`). tokview never reads or persists them.
 
 ## Privacy
 
@@ -128,9 +128,9 @@ capture:
 
 ## Security stance
 
-- All dependencies on the data path (proxy engine, web framework, ASGI server) are version-pinned. Patches arrive automatically on `pipx upgrade`; major-version jumps require an HTV release.
+- All dependencies on the data path (proxy engine, web framework, ASGI server) are version-pinned. Patches arrive automatically on `pipx upgrade`; major-version jumps require a tokview release.
 - Runtime fetching of model-pricing data is disabled — prices come from the pinned wheel, not a network fetch.
-- Default bind is `127.0.0.1`; non-loopback binds require explicit `htv start --allow-remote` *and* the matching config setting.
+- Default bind is `127.0.0.1`; non-loopback binds require explicit `tokview start --allow-remote` *and* the matching config setting.
 
 Full threat model in [SECURITY.md](SECURITY.md).
 
@@ -140,7 +140,7 @@ Full threat model in [SECURITY.md](SECURITY.md).
 
 Roadmap lives in [CHANGELOG.md](CHANGELOG.md). Near-term:
 - Cost-map refresh with hash verification
-- `htv test-providers` — smoke each configured provider with a $0.001 token
+- `tokview test-providers` — smoke each configured provider with a $0.001 token
 - Optional Postgres backend for multi-user use
 
 ## Contributing

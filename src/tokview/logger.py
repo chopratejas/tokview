@@ -1,7 +1,7 @@
-"""HTV's LiteLLM CustomLogger.
+"""tokview's LiteLLM CustomLogger.
 
 Hooks LiteLLM's success/failure events and writes one row per call into
-HTV's SQLite. Reads the StandardLoggingPayload (`kwargs["standard_logging_object"]`)
+tokview's SQLite. Reads the StandardLoggingPayload (`kwargs["standard_logging_object"]`)
 which LiteLLM populates from the provider's actual `usage` field + the
 pricing map. Cost is ground truth, not an estimate.
 """
@@ -19,8 +19,8 @@ from .db import Database
 logger = logging.getLogger(__name__)
 
 
-class HtvLogger(CustomLogger):
-    """Persists each LiteLLM-handled request to HTV's SQLite."""
+class TokviewLogger(CustomLogger):
+    """Persists each LiteLLM-handled request to tokview's SQLite."""
 
     def __init__(self, db: Database, pubsub: Any | None = None) -> None:
         super().__init__()
@@ -43,7 +43,7 @@ class HtvLogger(CustomLogger):
             if self.pubsub is not None:
                 await self.pubsub.publish({"event": "spend", "row": row})
         except Exception:
-            logger.exception("htv: failed to log success event")
+            logger.exception("tokview: failed to log success event")
 
     # Sync variant for codepaths that don't await the async hook.
     def log_success_event(
@@ -65,7 +65,7 @@ class HtvLogger(CustomLogger):
                     self.async_log_success_event(kwargs, response_obj, start_time, end_time)
                 )
         except Exception:
-            logger.exception("htv: log_success_event sync dispatch failed")
+            logger.exception("tokview: log_success_event sync dispatch failed")
 
     # ---- failure ----------------------------------------------------------
 
@@ -82,7 +82,7 @@ class HtvLogger(CustomLogger):
             if self.pubsub is not None:
                 await self.pubsub.publish({"event": "spend", "row": row})
         except Exception:
-            logger.exception("htv: failed to log failure event")
+            logger.exception("tokview: failed to log failure event")
 
     # ---- row builder ------------------------------------------------------
 
@@ -127,7 +127,7 @@ class HtvLogger(CustomLogger):
         *,
         success: bool,
     ) -> dict[str, Any]:
-        """Translate LiteLLM's StandardLoggingPayload into an HTV request row.
+        """Translate LiteLLM's StandardLoggingPayload into a tokview request row.
 
         Defensive on every field: LiteLLM has reshuffled this payload across
         releases. We try several common paths and fall back to safe defaults.
@@ -140,7 +140,7 @@ class HtvLogger(CustomLogger):
             slp.get("id")
             or slp.get("request_id")
             or kwargs.get("litellm_call_id")
-            or f"htv-{int(time.time() * 1e6)}"
+            or f"tokview-{int(time.time() * 1e6)}"
         )
         ts_ms = int(time.time() * 1000)
 
@@ -199,7 +199,7 @@ class HtvLogger(CustomLogger):
         # output at 0 and mark cost_estimated=1.
         cost_estimated = 0
         if not success and input_tokens == 0:
-            est = HtvLogger._estimate_input_tokens(kwargs, str(model))
+            est = TokviewLogger._estimate_input_tokens(kwargs, str(model))
             if est > 0:
                 input_tokens = est
                 cost_estimated = 1

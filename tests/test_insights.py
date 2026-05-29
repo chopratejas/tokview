@@ -5,7 +5,7 @@ tests never touch LiteLLM or the network.
 """
 from __future__ import annotations
 
-from headroom_token_view.insights import (
+from tokview.insights import (
     cache_savings_realized,
     caching_opportunity,
     compute_insights,

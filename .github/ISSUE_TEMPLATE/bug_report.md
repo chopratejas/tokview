@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Something broken in Headroom Token View
+about: Something broken in tokview
 title: "[bug] "
 labels: bug
 ---
@@ -22,7 +22,7 @@ labels: bug
 
 ## Environment
 
-- HTV version: `htv version`
+- tokview version: `tokview version`
 - Python: `python --version`
 - OS:
 - LiteLLM version (auto-resolved): `.venv/bin/pip show litellm | head -2`
@@ -30,7 +30,7 @@ labels: bug
 ## Logs
 
 <details>
-<summary>htv logs -n 100 (paste below)</summary>
+<summary>tokview logs -n 100 (paste below)</summary>
 
 ```
 ```
@@ -53,5 +53,5 @@ If the dashboard shows a wrong cost or token count:
 }
 ```
 
-- **HTV recorded:** `cost_usd=X.XXXXX`, `input_tokens=N`, `output_tokens=M`, ...
+- **tokview recorded:** `cost_usd=X.XXXXX`, `input_tokens=N`, `output_tokens=M`, ...
 - **Expected (per provider docs / billing):**

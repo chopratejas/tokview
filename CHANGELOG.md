@@ -1,41 +1,52 @@
 # Changelog
 
-All notable changes to Headroom Token View will be recorded here.
+All notable changes to tokview will be recorded here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.0.1] — 2026-05-27
+## [0.0.1] — 2026-05-28
 
-First release. Solo-laptop, single-tenant v1.
+First release. A small, local, single-user token viewer.
 
 ### Added
-- LiteLLM-backed proxy on `:4000` with SQLite-backed spend logging on `:3000`.
-- `HtvLogger` CustomLogger captures the provider's `usage` object (Anthropic
+- Drop-in proxy on `:4000` + SQLite-backed dashboard on `:3000`, in a single
+  daemonized Python process. Point any app at the proxy with one env var.
+- Exact per-call cost from the provider's own `usage` object (Anthropic
   prompt-cache write / 5-min read / 1-hour read, OpenAI cached tokens, Gemini
-  context cache, Claude extended-thinking / o-series reasoning tokens).
+  context cache, Claude extended-thinking / o-series reasoning tokens) — never
+  a tokenizer estimate.
+- **Latency & TTFT**: captures time-to-first-token and total latency per call;
+  per-model p50/p95 latency, TTFT, and tokens/sec at `/api/latency` and in the
+  live tail.
+- **Savings coach** (`/api/insights`): deterministic, local, no model calls.
+  Flags repeated uncached prompts that could be cached, reports caching savings
+  already realized, and offers a per-session cheaper-model what-if — all priced
+  from the local cost map.
+- **Session waterfall** (`/api/sessions/{id}`): a timeline view of every call in
+  an agent session with cost, tokens, latency, and TTFT.
 - Aggregate REST endpoints: `/api/summary` `/api/calls` `/api/providers`
   `/api/models` `/api/sessions` `/api/diagnostics`.
 - Live cost ticker via SSE `/api/events` with an in-process pub/sub fan-out.
-- Branded SvelteKit 5 + ECharts dashboard at `/`.
-- CLI: `htv start [-f] [--allow-remote] | stop | status | logs | export | reset
-  | version | config-path`. Daemonized by default.
+- SvelteKit 5 + ECharts dashboard at `/`.
+- CLI: `tokview start [-f] [--allow-remote] | stop | status | logs | export |
+  reset | version | config-path`. Daemonized by default.
 - Tokenizer-estimated input tokens (`cost_estimated=1`) for failure /
   mid-stream-disconnect rows.
-- 37-test pytest suite covering db, dashboard, logger, pubsub.
+- 64-test pytest suite (db, dashboard, logger, pubsub, insights).
 - GitHub Actions CI (lint + test + wheel build) and Trusted-Publishing
   workflow for PyPI.
 
 ### Security
-- `LITELLM_LOCAL_MODEL_COST_MAP=True` set before LiteLLM import; cost map
-  comes from the pinned wheel, not a runtime GitHub fetch (vector for the
+- `LITELLM_LOCAL_MODEL_COST_MAP=True` set before LiteLLM import; cost map comes
+  from the installed wheel, not a runtime GitHub fetch (the vector for the
   2026-01-27 LiteLLM cost-map incident).
-- LiteLLM soft-pinned `>=1.86.1,<2.0.0`. Major upgrades require an HTV
+- LiteLLM soft-pinned `>=1.86.1,<2.0.0`; a major upgrade requires a tokview
   release.
-- Default bind `127.0.0.1`. Non-loopback bind requires `--allow-remote`
-  on the CLI **and** the corresponding config setting.
+- Default bind `127.0.0.1`. A non-loopback bind requires `--allow-remote` on
+  the CLI **and** the corresponding config setting.
 
-[Unreleased]: https://github.com/chopratejas/headroom-token-view/compare/v0.0.1...HEAD
-[0.0.1]: https://github.com/chopratejas/headroom-token-view/releases/tag/v0.0.1
+[Unreleased]: https://github.com/chopratejas/tokview/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/chopratejas/tokview/releases/tag/v0.0.1

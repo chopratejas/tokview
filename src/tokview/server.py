@@ -1,4 +1,4 @@
-"""Orchestrate the LiteLLM proxy and the HTV dashboard backend in one process.
+"""Orchestrate the LiteLLM proxy and the tokview dashboard backend in one process.
 
 Both services share the asyncio event loop via `uvicorn.Server` + `asyncio.gather`.
 The proxy is LiteLLM's FastAPI app; the dashboard is ours. They listen on
@@ -15,29 +15,29 @@ from pathlib import Path
 
 import uvicorn
 
-from .config import DEFAULT_DIR, HtvConfig
+from .config import DEFAULT_DIR, TokviewConfig
 from .db import Database
 from .litellm_config import write as write_litellm_config
 
 logger = logging.getLogger(__name__)
 
 
-async def serve(htv: HtvConfig) -> None:
-    """Run LiteLLM proxy + HTV dashboard backend in one process, until SIGINT/SIGTERM."""
+async def serve(tokview: TokviewConfig) -> None:
+    """Run LiteLLM proxy + tokview dashboard backend in one process, until SIGINT/SIGTERM."""
     # Generate and point LiteLLM at our generated config BEFORE importing the proxy app
     litellm_config_path = DEFAULT_DIR / "litellm-config.yaml"
-    write_litellm_config(htv, litellm_config_path)
+    write_litellm_config(tokview, litellm_config_path)
     os.environ["CONFIG_FILE_PATH"] = str(litellm_config_path)
 
     # SECURITY: Use the cost map bundled in the pinned LiteLLM wheel — do NOT
     # fetch model_prices_and_context_window.json from GitHub at runtime.
     # That auto-fetch is the vector for the 2026-01-27 cost-map incident.
-    # HTV will add its own SHA-256-verified refresh in a later iteration
+    # tokview will add its own SHA-256-verified refresh in a later iteration
     # (per spec §8); until then, prices are pinned to the LiteLLM release.
     os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
     # Open SQLite (creates the file + schema on first run).
-    db = Database(htv.storage.path)
+    db = Database(tokview.storage.path)
     await db.open()
 
     # Imported lazily so the CONFIG_FILE_PATH and LITELLM_LOCAL_MODEL_COST_MAP
@@ -46,29 +46,29 @@ async def serve(htv: HtvConfig) -> None:
     from litellm.proxy.proxy_server import app as litellm_app
 
     from .dashboard import build_app
-    from .logger import HtvLogger
+    from .logger import TokviewLogger
 
-    # Register the HTV CustomLogger — it fires after every LiteLLM-handled
+    # Register the tokview CustomLogger — it fires after every LiteLLM-handled
     # call and persists the spend row + publishes to the SSE pubsub.
     from .pubsub import PubSub
 
     pubsub = PubSub(queue_size=200)
-    htv_logger = HtvLogger(db=db, pubsub=pubsub)
-    litellm.callbacks = [htv_logger]
+    tokview_logger = TokviewLogger(db=db, pubsub=pubsub)
+    litellm.callbacks = [tokview_logger]
 
     dashboard_app = build_app(db=db, pubsub=pubsub)
 
     proxy_cfg = uvicorn.Config(
         litellm_app,
-        host=htv.proxy.bind,
-        port=htv.proxy.port,
+        host=tokview.proxy.bind,
+        port=tokview.proxy.port,
         log_level="info",
         access_log=False,
     )
     dash_cfg = uvicorn.Config(
         dashboard_app,
-        host=htv.dashboard.bind,
-        port=htv.dashboard.port,
+        host=tokview.dashboard.bind,
+        port=tokview.dashboard.port,
         log_level="info",
         access_log=False,
     )

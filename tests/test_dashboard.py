@@ -4,10 +4,10 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from headroom_token_view.dashboard import build_app
-from headroom_token_view.db import Database
-from headroom_token_view.pubsub import PubSub
 from tests.test_db import _row
+from tokview.dashboard import build_app
+from tokview.db import Database
+from tokview.pubsub import PubSub
 
 
 @pytest.fixture
@@ -125,4 +125,4 @@ def test_static_or_inline_index_renders(client):
     r = client.get("/")
     assert r.status_code == 200
     # Either the SvelteKit shell or the inline HTML — both contain the brand name
-    assert "Headroom Token View" in r.text
+    assert "tokview" in r.text

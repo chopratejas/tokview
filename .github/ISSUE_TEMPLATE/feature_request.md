@@ -11,7 +11,7 @@ labels: enhancement
 
 ## Proposed behavior
 
-<!-- What should HTV do? A concrete UX sketch is helpful. -->
+<!-- What should tokview do? A concrete UX sketch is helpful. -->
 
 ## Alternatives considered
 

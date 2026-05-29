@@ -1,6 +1,6 @@
-"""HTV configuration loading.
+"""tokview configuration loading.
 
-Loads ~/.headroom-token-view/config.yaml on first start; writes a default file
+Loads ~/.tokview/config.yaml on first start; writes a default file
 if none exists. Pydantic-validated.
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
-DEFAULT_DIR = Path.home() / ".headroom-token-view"
+DEFAULT_DIR = Path.home() / ".tokview"
 DEFAULT_CONFIG_PATH = DEFAULT_DIR / "config.yaml"
 DEFAULT_DB_PATH = DEFAULT_DIR / "db.sqlite"
 
@@ -57,7 +57,7 @@ class CaptureConfig(BaseModel):
     max_chars_per_field: int = 8192
 
 
-class HtvConfig(BaseModel):
+class TokviewConfig(BaseModel):
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
@@ -67,21 +67,21 @@ class HtvConfig(BaseModel):
     capture: CaptureConfig = Field(default_factory=CaptureConfig)
 
 
-def load(path: Path | None = None) -> HtvConfig:
-    """Load HTV config from disk. Write defaults if missing."""
+def load(path: Path | None = None) -> TokviewConfig:
+    """Load tokview config from disk. Write defaults if missing."""
     path = path or DEFAULT_CONFIG_PATH
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
-        defaults = HtvConfig()
+        defaults = TokviewConfig()
         write(defaults, path)
         return defaults
     with path.open() as fh:
         data: dict[str, Any] = yaml.safe_load(fh) or {}
-    return HtvConfig(**data)
+    return TokviewConfig(**data)
 
 
-def write(cfg: HtvConfig, path: Path | None = None) -> None:
-    """Persist HTV config to disk (used for first-run defaults and `htv config set`)."""
+def write(cfg: TokviewConfig, path: Path | None = None) -> None:
+    """Persist tokview config to disk (used for first-run defaults and `tokview config set`)."""
     path = path or DEFAULT_CONFIG_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     data = cfg.model_dump(mode="json")

@@ -1,6 +1,6 @@
 """In-process pub/sub for spend events.
 
-Single Python process, asyncio-only. The HtvLogger publishes each row;
+Single Python process, asyncio-only. The TokviewLogger publishes each row;
 SSE subscribers (one per connected dashboard tab) drain from their own
 bounded queue. On slow consumer, we drop the oldest event rather than
 backpressure the producer (we never want logging to block requests).
@@ -36,7 +36,7 @@ class PubSub:
                     q.get_nowait()
                     q.put_nowait(message)
                 except (asyncio.QueueEmpty, asyncio.QueueFull):
-                    logger.warning("htv pubsub: dropped event for slow subscriber")
+                    logger.warning("tokview pubsub: dropped event for slow subscriber")
 
     @asynccontextmanager
     async def subscribe(self) -> AsyncIterator[asyncio.Queue[Any]]:

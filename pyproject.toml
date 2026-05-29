@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "headroom-token-view"
+name = "tokview"
 version = "0.0.1"
 description = "A small, local token viewer for LLM API calls. Runs a tiny proxy on your laptop; shows the exact cost of every Claude / OpenAI / Gemini call in a dashboard. That's it."
 readme = "README.md"
@@ -62,18 +62,17 @@ dev = [
 ]
 
 [project.scripts]
-htv = "headroom_token_view.cli:main"
-headroom-token-view = "headroom_token_view.cli:main"
+tokview = "tokview.cli:main"
 
 [project.urls]
-Homepage      = "https://github.com/chopratejas/headroom-token-view"
-Repository    = "https://github.com/chopratejas/headroom-token-view"
-Documentation = "https://github.com/chopratejas/headroom-token-view#readme"
-Issues        = "https://github.com/chopratejas/headroom-token-view/issues"
-Changelog     = "https://github.com/chopratejas/headroom-token-view/blob/main/CHANGELOG.md"
+Homepage      = "https://github.com/chopratejas/tokview"
+Repository    = "https://github.com/chopratejas/tokview"
+Documentation = "https://github.com/chopratejas/tokview#readme"
+Issues        = "https://github.com/chopratejas/tokview/issues"
+Changelog     = "https://github.com/chopratejas/tokview/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/headroom_token_view"]
+packages = ["src/tokview"]
 
 [tool.hatch.build.targets.wheel.force-include]
 # Bundle the SvelteKit build into the wheel so `pipx install` ships
@@ -81,7 +80,7 @@ packages = ["src/headroom_token_view"]
 # BEFORE `python -m build`. For editable/CI installs without Node,
 # the hatch_build.py hook below writes a placeholder so the include
 # succeeds and the runtime serves a "run npm run build" message.
-"web/build" = "headroom_token_view/_web"
+"web/build" = "tokview/_web"
 
 [tool.hatch.build.targets.wheel.hooks.custom]
 # Runs before the wheel target's force-include is enforced. Creates

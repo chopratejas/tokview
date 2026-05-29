@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from headroom_token_view.db import Database
+from tokview.db import Database
 
 pytestmark = pytest.mark.asyncio
 
@@ -100,7 +100,7 @@ async def test_migration_adds_columns_to_old_db(tmp_path):
     await conn.commit()
     await conn.close()
 
-    # Opening through HTV should migrate it without losing the existing row.
+    # Opening through tokview should migrate it without losing the existing row.
     db = Database(db_path)
     await db.open()
     try:

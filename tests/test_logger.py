@@ -1,9 +1,9 @@
-"""Tests for HtvLogger._build_row across provider streaming shapes.
+"""Tests for TokviewLogger._build_row across provider streaming shapes.
 
 These exercise the field-extraction logic against payloads that match
 what LiteLLM passes into the CustomLogger after each provider's stream
 completes. The point isn't to retest LiteLLM's parsing — that's verified
-end-to-end in iter 9 — but to lock in HTV's interpretation of the
+end-to-end in iter 9 — but to lock in tokview's interpretation of the
 StandardLoggingPayload + response.usage so future LiteLLM upgrades
 that reshape the payload show up as test failures, not silent data loss.
 """
@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from headroom_token_view.logger import HtvLogger, _extract_usage, _provider_from_model
 from tests.conftest import FakeResponse, FakeUsage, fake_now, make_kwargs
+from tokview.logger import TokviewLogger, _extract_usage, _provider_from_model
 
 START = fake_now()
 END = START + dt.timedelta(milliseconds=125)
@@ -24,7 +24,7 @@ END = START + dt.timedelta(milliseconds=125)
 # ---------- helpers ----------
 
 def build_row(*, kwargs: dict[str, Any], response: Any, success: bool = True) -> dict[str, Any]:
-    return HtvLogger._build_row(kwargs, response, START, END, success=success)
+    return TokviewLogger._build_row(kwargs, response, START, END, success=success)
 
 
 # ---------- Anthropic ----------
@@ -101,7 +101,7 @@ def test_anthropic_extended_thinking_reasoning_tokens():
 
 def test_openai_streaming_with_include_usage():
     """OpenAI streaming requires stream_options.include_usage=true; the usage
-    chunk arrives last (empty choices, populated usage). HTV reads it via
+    chunk arrives last (empty choices, populated usage). tokview reads it via
     response.usage just like non-streaming."""
     kwargs = make_kwargs(
         model="openai/gpt-4o",
@@ -137,7 +137,7 @@ def test_openai_cached_tokens_discount():
         )
     )
     row = build_row(kwargs=kwargs, response=response)
-    # OpenAI cached tokens are aggregated into HTV's cache_read_tokens
+    # OpenAI cached tokens are aggregated into tokview's cache_read_tokens
     # alongside Anthropic's cache_read_input_tokens.
     assert row["cache_read_tokens"] == 800
     assert row["input_tokens"] == 2000
@@ -287,7 +287,7 @@ def test_ttft_ignores_clock_skew():
 
 def test_failure_with_messages_estimates_input_tokens():
     """When the call fails before usage is reported, but we have the prompt,
-    HTV runs the tokenizer over the request to set a best-effort input
+    tokview runs the tokenizer over the request to set a best-effort input
     token count and marks cost_estimated=1."""
     kwargs = make_kwargs(
         model="openai/gpt-4o",
@@ -331,7 +331,7 @@ def test_provider_inference_from_model_when_missing():
     assert _provider_from_model("openai/gpt-4o") == "openai"
     assert _provider_from_model("gemini-2.5-pro") == "google"
     # Vertex AI is Google's hosting of Gemini — same billing namespace,
-    # so HTV groups it under "google".
+    # so tokview groups it under "google".
     assert _provider_from_model("vertex_ai/gemini-2.0") == "google"
     assert _provider_from_model("") == "unknown"
     assert _provider_from_model("some/unknown") == "some"

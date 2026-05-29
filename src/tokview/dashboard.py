@@ -1,4 +1,4 @@
-"""FastAPI app for the Headroom Token View dashboard backend.
+"""FastAPI app for the tokview dashboard backend.
 
 Iter 3 exposes:
   /api/health, /api/status      — liveness probes
@@ -40,7 +40,7 @@ def _find_web_build() -> Path | None:
     neither exists; the caller then falls back to the inline HTML.
     """
     try:
-        pkg_web = files("headroom_token_view") / "_web"
+        pkg_web = files("tokview") / "_web"
         # files() yields a Traversable; coerce to a real path
         path = Path(str(pkg_web))
         if (path / "index.html").exists():
@@ -72,7 +72,7 @@ def _now_ms() -> int:
 def build_app(db: Database, pubsub: PubSub | None = None) -> FastAPI:
     started_at = time.time()
     app = FastAPI(
-        title="Headroom Token View",
+        title="tokview",
         version=__version__,
         docs_url=None,
         redoc_url=None,
@@ -273,11 +273,11 @@ def build_app(db: Database, pubsub: PubSub | None = None) -> FastAPI:
     # mode without `npm run build`), fall back to the inline HTML below.
     web_build = _find_web_build()
     if web_build is not None:
-        logger.info("htv: serving SPA from %s", web_build)
+        logger.info("tokview: serving SPA from %s", web_build)
         app.mount("/", StaticFiles(directory=web_build, html=True), name="spa")
     else:
         logger.warning(
-            "htv: SvelteKit build not found; falling back to inline HTML. "
+            "tokview: SvelteKit build not found; falling back to inline HTML. "
             "Run `npm run build` in web/ to enable the full dashboard."
         )
 
@@ -297,13 +297,13 @@ async def _gather_aggs(db: Database, windows: list[tuple[int, int]]) -> list[dic
 
 
 # Embedded vanilla-JS dashboard. Iter 5 swaps in the SvelteKit build; until
-# then this gives a real "Headroom Token View" experience without a build step.
+# then this gives a real "tokview" experience without a build step.
 _INDEX_HTML = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Headroom Token View</title>
+  <title>tokview</title>
   <style>
     :root {
       --bg: #0e1117;
@@ -358,7 +358,7 @@ _INDEX_HTML = """<!doctype html>
 </head>
 <body>
   <header>
-    <h1><span class="brand-glyph">◆</span>Headroom Token View</h1>
+    <h1><span class="brand-glyph">◆</span>tokview</h1>
     <span class="live"><span class="dot"></span> live · polling every 3s</span>
   </header>
   <main>

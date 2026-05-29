@@ -23,9 +23,9 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 _PLACEHOLDER_HTML = """<!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"/><title>Headroom Token View</title></head>
+  <head><meta charset="utf-8"/><title>tokview</title></head>
   <body style="font:14px system-ui;padding:2em;color:#1a1a1a;background:#fafafa">
-    <h2>Headroom Token View</h2>
+    <h2>tokview</h2>
     <p>The SvelteKit dashboard wasn't included in this install
        (you're either running an editable install without Node,
        or someone built the wheel without running <code>npm run build</code>).</p>

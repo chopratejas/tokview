@@ -1,4 +1,4 @@
-"""SQLite layer for Headroom Token View.
+"""SQLite layer for tokview.
 
 Async via aiosqlite. WAL mode, busy_timeout=5000, NORMAL sync. We own
 all writes (LiteLLM is in stateless gateway mode), so the budget-decrement
@@ -132,7 +132,7 @@ class Database:
         await self._conn.executescript(SCHEMA)
         await self._migrate()
         await self._conn.commit()
-        logger.info("htv: opened sqlite at %s", self.path)
+        logger.info("tokview: opened sqlite at %s", self.path)
 
     async def _migrate(self) -> None:
         """Add columns introduced after the initial schema, for old DBs.
@@ -146,7 +146,7 @@ class Database:
         for name, sql_type in _MIGRATION_COLUMNS:
             if name not in existing:
                 await self.conn.execute(f"ALTER TABLE requests ADD COLUMN {name} {sql_type}")
-                logger.info("htv: migrated — added requests.%s", name)
+                logger.info("tokview: migrated — added requests.%s", name)
 
     async def close(self) -> None:
         if self._conn is not None:
