@@ -7,10 +7,18 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-A tiny **local** proxy + dashboard. Point any app at it with one env var and watch your token spend break down by model, by session, and — uniquely — by *tool call*:
+A tiny **local** proxy plus a **web dashboard**. Point any app at the proxy with one env var; the dashboard at `localhost:3000` then breaks your token spend down by model, by session, and — uniquely — by *tool call*.
+
+<!--
+  Real dashboard screenshot goes here. Once captured, drop the image in docs/
+  and uncomment the line below (it can sit above or replace the sketch):
+  ![tokview dashboard](docs/dashboard.png)
+-->
+
+Here's the per-tool breakdown it surfaces (sketch — a real screenshot is coming):
 
 ```text
-  session: claude-code · 47 calls · 2.1M tokens                  live at localhost:3000
+  the dashboard · session: claude-code · 47 calls · 2.1M tokens
   ──────────────────────────────────────────────────────────────────────────────────
   Read                  ×12   1,240k  ████████████████████████████████████      59%
   mcp__github__search   ×5      410k  ███████████                               20%
@@ -20,8 +28,6 @@ A tiny **local** proxy + dashboard. Point any app at it with one env var and wat
   ──────────────────────────────────────────────────────────────────────────────────
   ⚠  one Read result rode along on 9 later turns — ~140k tokens re-sent as input
 ```
-
-<!-- TODO: replace or augment the ASCII demo above with a real dashboard screenshot / GIF -->
 
 Most tools just tell you a call used 180k tokens. tokview tells you *which tool* spent them — and catches the dominant hidden agent cost: a big tool result (a `Read`, an MCP dump) re-billed as input on every later turn. Tracing platforms can show this only if you wrap your code in their SDK; tokview gets it from one env var, for any app or CLI you can point at a URL — even Claude Code. No account, no cloud, no Docker.
 
