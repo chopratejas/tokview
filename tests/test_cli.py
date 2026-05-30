@@ -1,4 +1,5 @@
 """Tests for the terminal dashboard renderer."""
+
 from __future__ import annotations
 
 import asyncio
@@ -109,6 +110,7 @@ def test_show_session_includes_tool_attribution_and_request_timeline(tmp_path):
     assert "Read" in out
     assert "Read:910" in out
     assert "anthropic/claude-opus" in out
+
 
 def test_show_latest_selects_most_recent_session(tmp_path):
     db_path = tmp_path / "tokview.sqlite"

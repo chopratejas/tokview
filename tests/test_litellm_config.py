@@ -1,4 +1,5 @@
 """Tests for generated LiteLLM proxy config."""
+
 from __future__ import annotations
 
 from tokview.config import TokviewConfig

@@ -7,6 +7,7 @@ end-to-end in iter 9 — but to lock in tokview's interpretation of the
 StandardLoggingPayload + response.usage so future LiteLLM upgrades
 that reshape the payload show up as test failures, not silent data loss.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -23,11 +24,13 @@ END = START + dt.timedelta(milliseconds=125)
 
 # ---------- helpers ----------
 
+
 def build_row(*, kwargs: dict[str, Any], response: Any, success: bool = True) -> dict[str, Any]:
     return TokviewLogger._build_row(kwargs, response, START, END, success=success)
 
 
 # ---------- Anthropic ----------
+
 
 def test_anthropic_streaming_basic_usage():
     """Anthropic streaming: final usage in message_delta has input/output tokens."""
@@ -99,6 +102,7 @@ def test_anthropic_extended_thinking_reasoning_tokens():
 
 # ---------- OpenAI ----------
 
+
 def test_openai_streaming_with_include_usage():
     """OpenAI streaming requires stream_options.include_usage=true; the usage
     chunk arrives last (empty choices, populated usage). tokview reads it via
@@ -165,6 +169,7 @@ def test_openai_o1_reasoning_tokens():
 
 # ---------- Gemini ----------
 
+
 def test_gemini_streaming_usage_metadata():
     """Gemini streaming emits usageMetadata in each chunk (populated in the
     final). After LiteLLM normalizes to the OpenAI shape we read it the
@@ -207,6 +212,7 @@ def test_gemini_context_cache():
 
 # ---------- failure / disconnect ----------
 
+
 def test_failure_event_logs_zero_cost_with_error():
     kwargs = make_kwargs(
         model="anthropic/claude-3-5-sonnet-20240620",
@@ -225,6 +231,7 @@ def test_failure_event_logs_zero_cost_with_error():
 
 
 # ---------- metadata flow ----------
+
 
 def test_session_user_tags_useragent_propagate():
     kwargs = make_kwargs(
@@ -245,6 +252,7 @@ def test_session_user_tags_useragent_propagate():
 
 
 # ---------- latency / TTFT capture ----------
+
 
 def test_ttft_and_start_ms_from_completion_start_time():
     """TTFT = completion_start_time - start_time; start_ms from the start arg."""
@@ -285,6 +293,7 @@ def test_ttft_ignores_clock_skew():
 
 # ---------- disconnect / failure tokenizer fallback ----------
 
+
 def test_failure_with_messages_estimates_input_tokens():
     """When the call fails before usage is reported, but we have the prompt,
     tokview runs the tokenizer over the request to set a best-effort input
@@ -295,9 +304,7 @@ def test_failure_with_messages_estimates_input_tokens():
         response_cost=0.0,
         extra_slp={"status_code": 500, "error_str": "boom"},
     )
-    kwargs["messages"] = [
-        {"role": "user", "content": "Write a haiku about latency budgets."}
-    ]
+    kwargs["messages"] = [{"role": "user", "content": "Write a haiku about latency budgets."}]
     row = build_row(kwargs=kwargs, response=None, success=False)
     assert row["completed"] == 0
     assert row["input_tokens"] > 0, "expected tokenizer estimate"
@@ -320,6 +327,7 @@ def test_failure_without_messages_leaves_zero_tokens_unestimated():
 
 
 # ---------- helpers / inference ----------
+
 
 def test_provider_inference_from_model_when_missing():
     """If LiteLLM didn't tag the call, we infer provider from model name."""

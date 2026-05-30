@@ -1,4 +1,5 @@
 """Endpoint sanity tests for the FastAPI dashboard backend."""
+
 from __future__ import annotations
 
 import pytest
@@ -21,14 +22,27 @@ def client(tmp_path):
         db.insert_request(_row(request_id="r-success", provider="anthropic", cost_usd=0.05))
     )
     asyncio.get_event_loop().run_until_complete(
-        db.insert_request(_row(request_id="r-fail", provider="openai", cost_usd=0, status_code=500, completed=0))
+        db.insert_request(
+            _row(request_id="r-fail", provider="openai", cost_usd=0, status_code=500, completed=0)
+        )
     )
     asyncio.get_event_loop().run_until_complete(
-        db.insert_tool_calls([
-            {"tool_call_id": "tc-1", "request_id": "r-success", "session_id": "sess-1",
-             "ts_ms": 1, "provider": "anthropic", "model": "claude-3-5-sonnet",
-             "tool_name": "Read", "arg_tokens": 5, "result_tokens": 200, "total_tokens": 205},
-        ])
+        db.insert_tool_calls(
+            [
+                {
+                    "tool_call_id": "tc-1",
+                    "request_id": "r-success",
+                    "session_id": "sess-1",
+                    "ts_ms": 1,
+                    "provider": "anthropic",
+                    "model": "claude-3-5-sonnet",
+                    "tool_name": "Read",
+                    "arg_tokens": 5,
+                    "result_tokens": 200,
+                    "total_tokens": 205,
+                },
+            ]
+        )
     )
     pubsub = PubSub()
     app = build_app(db=db, pubsub=pubsub)

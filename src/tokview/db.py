@@ -4,6 +4,7 @@ Async via aiosqlite. WAL mode, busy_timeout=5000, NORMAL sync. We own
 all writes (LiteLLM is in stateless gateway mode), so the budget-decrement
 race that drives LiteLLM's "Postgres required" guidance does not apply.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,6 +29,7 @@ def _percentile(values: list[float], pct: float) -> float | None:
     hi = min(lo + 1, len(ordered) - 1)
     frac = rank - lo
     return round(ordered[lo] * (1 - frac) + ordered[hi] * frac, 2)
+
 
 SCHEMA = """
 PRAGMA journal_mode = WAL;
@@ -108,15 +110,34 @@ CREATE INDEX IF NOT EXISTS idx_tool_name    ON tool_calls(tool_name);
 
 # Columns the writer is allowed to set on INSERT (order matters for the SQL builder).
 REQUEST_COLS: tuple[str, ...] = (
-    "request_id", "ts_ms", "provider", "model", "session_id", "user", "tags",
-    "user_agent", "team_id",
-    "input_tokens", "output_tokens",
-    "cache_creation_tokens", "cache_read_tokens", "cache_read_1h_tokens",
-    "reasoning_tokens", "image_tokens", "audio_tokens",
-    "cost_usd", "cost_estimated",
-    "is_stream", "completed", "latency_ms", "start_ms", "ttft_ms",
-    "status_code", "error_message",
-    "prompt_text", "response_text",
+    "request_id",
+    "ts_ms",
+    "provider",
+    "model",
+    "session_id",
+    "user",
+    "tags",
+    "user_agent",
+    "team_id",
+    "input_tokens",
+    "output_tokens",
+    "cache_creation_tokens",
+    "cache_read_tokens",
+    "cache_read_1h_tokens",
+    "reasoning_tokens",
+    "image_tokens",
+    "audio_tokens",
+    "cost_usd",
+    "cost_estimated",
+    "is_stream",
+    "completed",
+    "latency_ms",
+    "start_ms",
+    "ttft_ms",
+    "status_code",
+    "error_message",
+    "prompt_text",
+    "response_text",
 )
 
 # Columns added after the initial release. Each entry is (name, SQL type).
@@ -296,7 +317,7 @@ class Database:
                 COUNT(*)                                                                             AS total_requests
             FROM requests
             """,
-            (int((__import__('time').time() - 86400) * 1000),),
+            (int((__import__("time").time() - 86400) * 1000),),
         ) as cur:
             row = await cur.fetchone()
             return {
@@ -319,7 +340,9 @@ class Database:
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
-    async def by_session(self, since_ms: int, until_ms: int, limit: int = 20) -> list[dict[str, Any]]:
+    async def by_session(
+        self, since_ms: int, until_ms: int, limit: int = 20
+    ) -> list[dict[str, Any]]:
         async with self.conn.execute(
             """
             SELECT

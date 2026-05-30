@@ -17,6 +17,7 @@ honest; per-block cost would not be.
 `count_tokens(model, text) -> int` is injected so this module stays pure and
 testable; the proxy passes a LiteLLM-backed counter.
 """
+
 from __future__ import annotations
 
 import json
@@ -41,7 +42,9 @@ def _as_text(value: Any) -> str:
         parts: list[str] = []
         for item in value:
             if isinstance(item, dict):
-                parts.append(str(item.get("text") or item.get("content") or json.dumps(item, default=str)))
+                parts.append(
+                    str(item.get("text") or item.get("content") or json.dumps(item, default=str))
+                )
             else:
                 parts.append(str(item))
         return "\n".join(parts)
@@ -68,8 +71,8 @@ def parse_completed_tool_calls(
     if not messages:
         return []
 
-    uses: dict[str, dict[str, str]] = {}   # id -> {name, arg_text}
-    results: dict[str, str] = {}           # id -> result_text
+    uses: dict[str, dict[str, str]] = {}  # id -> {name, arg_text}
+    results: dict[str, str] = {}  # id -> result_text
 
     for msg in messages:
         if not isinstance(msg, dict):
@@ -85,7 +88,10 @@ def parse_completed_tool_calls(
             tid = tc.get("id")
             fn = tc.get("function") or {}
             if tid:
-                uses[tid] = {"name": fn.get("name") or "unknown", "arg_text": _as_text(fn.get("arguments"))}
+                uses[tid] = {
+                    "name": fn.get("name") or "unknown",
+                    "arg_text": _as_text(fn.get("arguments")),
+                }
         # tool result message
         if role == "tool" and msg.get("tool_call_id"):
             results[msg["tool_call_id"]] = _as_text(content)

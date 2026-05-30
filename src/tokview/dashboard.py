@@ -8,6 +8,7 @@ Iter 3 exposes:
   /api/sessions                 — per-session aggregates
   /                             — embedded vanilla-JS dashboard (Iter 5 swaps in SvelteKit)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -41,6 +42,7 @@ def _find_web_build() -> Path | None:
     installs can contain hatch_build.py's placeholder index; ignore that so the
     functional inline dashboard remains available.
     """
+
     def usable(path: Path) -> bool:
         index = path / "index.html"
         if not index.exists():
@@ -186,7 +188,13 @@ def build_app(db: Database, pubsub: PubSub | None = None) -> FastAPI:
         calls = await db.session_calls(session_id)
         if not calls:
             return JSONResponse(
-                {"session_id": session_id, "calls": [], "summary": None, "insights": [], "tools": []}
+                {
+                    "session_id": session_id,
+                    "calls": [],
+                    "summary": None,
+                    "insights": [],
+                    "tools": [],
+                }
             )
 
         starts = [c["start_ms"] or c["ts_ms"] for c in calls]
@@ -235,11 +243,11 @@ def build_app(db: Database, pubsub: PubSub | None = None) -> FastAPI:
     @app.get("/api/diagnostics")
     async def diagnostics() -> JSONResponse:
         """Guardrails dashboard endpoint. Surfaces:
-           - missing_pricing: rows that completed with tokens > 0 but cost = 0
-             (canary for an unrecognized model — spec §8).
-           - estimated: rows with tokenizer-estimated cost (disconnect path).
-           - errors_24h: failed calls in the last 24h.
-           - subscribers: live SSE subscriber count.
+        - missing_pricing: rows that completed with tokens > 0 but cost = 0
+          (canary for an unrecognized model — spec §8).
+        - estimated: rows with tokenizer-estimated cost (disconnect path).
+        - errors_24h: failed calls in the last 24h.
+        - subscribers: live SSE subscriber count.
         """
         metrics = await db.health_metrics()
         errors = await db.recent_errors(limit=10)

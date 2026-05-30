@@ -5,6 +5,7 @@ SSE subscribers (one per connected dashboard tab) drain from their own
 bounded queue. On slow consumer, we drop the oldest event rather than
 backpressure the producer (we never want logging to block requests).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -42,10 +43,10 @@ class PubSub:
     async def subscribe(self) -> AsyncIterator[asyncio.Queue[Any]]:
         """Context-managed subscription. Use:
 
-            async with pubsub.subscribe() as q:
-                while True:
-                    msg = await q.get()
-                    ...
+        async with pubsub.subscribe() as q:
+            while True:
+                msg = await q.get()
+                ...
         """
         q: asyncio.Queue[Any] = asyncio.Queue(maxsize=self._queue_size)
         async with self._lock:

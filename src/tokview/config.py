@@ -3,6 +3,7 @@
 Loads ~/.tokview/config.yaml on first start; writes a default file
 if none exists. Pydantic-validated.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

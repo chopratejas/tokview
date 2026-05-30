@@ -4,6 +4,7 @@ LiteLLM's proxy reads YAML for its model list and settings. We generate this
 on every start so tokview config is the single source of truth — users edit
 ~/.tokview/config.yaml, not a LiteLLM file.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

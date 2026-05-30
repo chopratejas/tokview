@@ -5,6 +5,7 @@ The proxy is LiteLLM's FastAPI app; the dashboard is ours. They listen on
 separate ports so that exposing the dashboard never exposes the proxy and
 vice-versa.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -165,8 +166,7 @@ class ModelPrefixMiddleware:
             return
 
         headers = {
-            k.decode("latin1").lower(): v.decode("latin1")
-            for k, v in scope.get("headers", [])
+            k.decode("latin1").lower(): v.decode("latin1") for k, v in scope.get("headers", [])
         }
         content_type = headers.get("content-type", "")
         if "application/json" not in content_type:

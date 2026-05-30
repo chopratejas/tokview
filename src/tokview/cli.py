@@ -11,6 +11,7 @@ Commands:
     tokview version
     tokview config-path
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -47,7 +48,8 @@ def main() -> None:
 
 @main.command()
 @click.option(
-    "--foreground", "-f",
+    "--foreground",
+    "-f",
     is_flag=True,
     default=False,
     help="Run in the foreground instead of daemonizing (good for debugging).",
@@ -183,15 +185,20 @@ def status() -> None:
         try:
             import httpx
 
-            r = httpx.get(f"http://{tokview.dashboard.bind}:{tokview.dashboard.port}/api/diagnostics", timeout=2.0)
+            r = httpx.get(
+                f"http://{tokview.dashboard.bind}:{tokview.dashboard.port}/api/diagnostics",
+                timeout=2.0,
+            )
             if r.status_code == 200:
                 d = r.json()
                 m = d.get("metrics", {})
                 click.echo(f"  uptime:    {d.get('uptime_seconds', 0):.0f}s")
-                click.echo(f"  requests:  {m.get('total_requests', 0)} total · "
-                           f"{m.get('errors_24h', 0)} errors/24h · "
-                           f"{m.get('estimated', 0)} estimated · "
-                           f"{m.get('missing_pricing', 0)} missing-pricing")
+                click.echo(
+                    f"  requests:  {m.get('total_requests', 0)} total · "
+                    f"{m.get('errors_24h', 0)} errors/24h · "
+                    f"{m.get('estimated', 0)} estimated · "
+                    f"{m.get('missing_pricing', 0)} missing-pricing"
+                )
                 click.echo(f"  SSE subs:  {d.get('subscribers', 0)}")
         except Exception as e:
             click.echo(f"  diagnostics: unreachable ({e})")
@@ -206,7 +213,9 @@ def show(session_id: str | None, latest: bool, limit: int, watch: bool) -> None:
     """Render a terminal dashboard from the local SQLite database."""
     tokview = load_config()
     if not tokview.storage.path.exists():
-        raise click.ClickException(f"no database found at {tokview.storage.path}; run tokview start first")
+        raise click.ClickException(
+            f"no database found at {tokview.storage.path}; run tokview start first"
+        )
     if limit < 1:
         raise click.ClickException("--limit must be >= 1")
 
@@ -214,7 +223,9 @@ def show(session_id: str | None, latest: bool, limit: int, watch: bool) -> None:
         if watch:
             click.clear()
         active_session = "latest" if latest else session_id
-        click.echo(_render_cli_dashboard(tokview.storage.path, session_id=active_session, limit=limit))
+        click.echo(
+            _render_cli_dashboard(tokview.storage.path, session_id=active_session, limit=limit)
+        )
         if not watch:
             return
         time.sleep(2)
@@ -222,7 +233,9 @@ def show(session_id: str | None, latest: bool, limit: int, watch: bool) -> None:
 
 @main.command()
 @click.option("--tail", "-f", is_flag=True, help="Follow the log instead of printing it.")
-@click.option("--lines", "-n", type=int, default=100, help="Number of lines to print (default 100).")
+@click.option(
+    "--lines", "-n", type=int, default=100, help="Number of lines to print (default 100)."
+)
 def logs(tail: bool, lines: int) -> None:
     """Show the tokview server logs."""
     if not LOG_FILE.exists():
@@ -237,14 +250,18 @@ def logs(tail: bool, lines: int) -> None:
 
 @main.command()
 @click.option("--since", required=True, help="ISO date (YYYY-MM-DD) or unix ms.")
-@click.option("--format", "fmt", type=click.Choice(["csv", "json"]), default="csv", help="Output format.")
+@click.option(
+    "--format", "fmt", type=click.Choice(["csv", "json"]), default="csv", help="Output format."
+)
 def export(since: str, fmt: str) -> None:
     """Dump request rows to stdout."""
     tokview = load_config()
     # Parse since
     try:
-        since_ms = int(since) if since.isdigit() else int(
-            datetime.fromisoformat(since).replace(tzinfo=UTC).timestamp() * 1000
+        since_ms = (
+            int(since)
+            if since.isdigit()
+            else int(datetime.fromisoformat(since).replace(tzinfo=UTC).timestamp() * 1000)
         )
     except ValueError as e:
         raise click.ClickException(f"invalid --since {since!r}: {e}")
@@ -308,6 +325,7 @@ def config_path() -> None:
 
 # ----- helpers -----
 
+
 def _read_pid() -> int | None:
     if not PID_FILE.exists():
         return None
@@ -334,7 +352,11 @@ def _render_cli_dashboard(db_path: Path, session_id: str | None, limit: int) -> 
     try:
         if session_id == "latest":
             session_id = _latest_session_id(con)
-        return _render_session(con, session_id, limit) if session_id else _render_overview(con, db_path, limit)
+        return (
+            _render_session(con, session_id, limit)
+            if session_id
+            else _render_overview(con, db_path, limit)
+        )
     finally:
         con.close()
 
@@ -349,19 +371,29 @@ def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
     today = _agg(con, today_start, now_ms)
     week = _agg(con, week_start, now_ms)
     month = _agg(con, month_start, now_ms)
-    providers = _query(con, """
+    providers = _query(
+        con,
+        """
         SELECT provider, COUNT(*) requests, COALESCE(SUM(cost_usd), 0) cost_usd,
                COALESCE(SUM(input_tokens + output_tokens), 0) tokens
         FROM requests WHERE ts_ms BETWEEN ? AND ?
         GROUP BY provider ORDER BY cost_usd DESC, requests DESC LIMIT ?
-    """, (month_start, now_ms, limit))
-    models = _query(con, """
+    """,
+        (month_start, now_ms, limit),
+    )
+    models = _query(
+        con,
+        """
         SELECT model, COUNT(*) requests, COALESCE(SUM(cost_usd), 0) cost_usd,
                COALESCE(SUM(input_tokens + output_tokens), 0) tokens
         FROM requests WHERE ts_ms BETWEEN ? AND ?
         GROUP BY model ORDER BY cost_usd DESC, requests DESC LIMIT ?
-    """, (month_start, now_ms, limit))
-    sessions = _query(con, """
+    """,
+        (month_start, now_ms, limit),
+    )
+    sessions = _query(
+        con,
+        """
         SELECT
             r.session_id,
             COUNT(*) requests,
@@ -381,12 +413,20 @@ def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
         GROUP BY r.session_id
         ORDER BY last_ts_ms DESC
         LIMIT ?
-    """, (month_start, now_ms, limit))
-    calls = _query(con, """
+    """,
+        (month_start, now_ms, limit),
+    )
+    calls = _query(
+        con,
+        """
         SELECT ts_ms, provider, model, session_id, input_tokens, output_tokens, cost_usd, status_code
         FROM requests ORDER BY ts_ms DESC LIMIT ?
-    """, (limit,))
-    global_tools = _query(con, """
+    """,
+        (limit,),
+    )
+    global_tools = _query(
+        con,
+        """
         SELECT tool_name, COUNT(*) calls, COALESCE(SUM(arg_tokens), 0) arg_tokens,
                COALESCE(SUM(result_tokens), 0) result_tokens,
                COALESCE(SUM(total_tokens), 0) total_tokens
@@ -394,36 +434,78 @@ def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
         GROUP BY tool_name
         ORDER BY total_tokens DESC
         LIMIT ?
-    """, (limit,))
+    """,
+        (limit,),
+    )
 
     out = [
         _title("tokview", width),
         f"db: {_clip(db_path, width - 4)}",
         f"now: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}    live: tokview show --watch",
         "",
-        _cards([
-            ("today spend", _money(today["cost_usd"]), f"{today['requests']} calls / {_num(today['tokens'])} tok"),
-            ("7 day spend", _money(week["cost_usd"]), f"{week['requests']} calls / {_num(week['tokens'])} tok"),
-            ("month spend", _money(month["cost_usd"]), f"{month['requests']} calls / {_num(month['tokens'])} tok"),
-            ("month errors", str(month["errors"]), "failed provider calls"),
-        ], width),
+        _cards(
+            [
+                (
+                    "today spend",
+                    _money(today["cost_usd"]),
+                    f"{today['requests']} calls / {_num(today['tokens'])} tok",
+                ),
+                (
+                    "7 day spend",
+                    _money(week["cost_usd"]),
+                    f"{week['requests']} calls / {_num(week['tokens'])} tok",
+                ),
+                (
+                    "month spend",
+                    _money(month["cost_usd"]),
+                    f"{month['requests']} calls / {_num(month['tokens'])} tok",
+                ),
+                ("month errors", str(month["errors"]), "failed provider calls"),
+            ],
+            width,
+        ),
         "",
         _section("session spend"),
     ]
     if sessions:
         if compact:
-            out.append(_table(["session", "calls", "tokens", "tools", "cost", "last"], [
-                [_clip(r["session_id"] or "-", 20), str(r["requests"]), _num(r["tokens"]),
-                 _num(r["tool_tokens"]), _money(r["cost_usd"]), _age(r["last_ts_ms"])]
-                for r in sessions
-            ], width))
+            out.append(
+                _table(
+                    ["session", "calls", "tokens", "tools", "cost", "last"],
+                    [
+                        [
+                            _clip(r["session_id"] or "-", 20),
+                            str(r["requests"]),
+                            _num(r["tokens"]),
+                            _num(r["tool_tokens"]),
+                            _money(r["cost_usd"]),
+                            _age(r["last_ts_ms"]),
+                        ]
+                        for r in sessions
+                    ],
+                    width,
+                )
+            )
         else:
-            out.append(_table(["session", "calls", "tokens", "tool tok", "errors", "cost", "last", "models"], [
-                [_clip(r["session_id"] or "-", 26), str(r["requests"]), _num(r["tokens"]),
-                 _num(r["tool_tokens"]), str(r["errors"]), _money(r["cost_usd"]),
-                 _age(r["last_ts_ms"]), _clip(r["models"] or "-", 28)]
-                for r in sessions
-            ], width))
+            out.append(
+                _table(
+                    ["session", "calls", "tokens", "tool tok", "errors", "cost", "last", "models"],
+                    [
+                        [
+                            _clip(r["session_id"] or "-", 26),
+                            str(r["requests"]),
+                            _num(r["tokens"]),
+                            _num(r["tool_tokens"]),
+                            str(r["errors"]),
+                            _money(r["cost_usd"]),
+                            _age(r["last_ts_ms"]),
+                            _clip(r["models"] or "-", 28),
+                        ]
+                        for r in sessions
+                    ],
+                    width,
+                )
+            )
         top_session = sessions[0]["session_id"]
         out.append("latest session: tokview show --latest")
         out.append(f"copy: tokview show --session {top_session}")
@@ -442,33 +524,57 @@ def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
             )
             session_tools = _session_tools(con, sid, 3)
             if session_tools:
-                out.append("  tools: " + ", ".join(
-                    f"{t['tool_name']} {_num(t['total_tokens'])}" for t in session_tools
-                ))
+                out.append(
+                    "  tools: "
+                    + ", ".join(
+                        f"{t['tool_name']} {_num(t['total_tokens'])}" for t in session_tools
+                    )
+                )
             else:
                 out.append("  tools: none recorded yet")
             recent = _session_recent_calls(con, sid, 3)
-            headers = ["time", "model", "in->out", "cost", "tools"] if compact else ["time", "model", "in->out", "cost", "st", "tools"]
+            headers = (
+                ["time", "model", "in->out", "cost", "tools"]
+                if compact
+                else ["time", "model", "in->out", "cost", "st", "tools"]
+            )
             rows = [
-                [_time(c["ts_ms"]), _clip(c["model"] or "-", 18 if compact else 24),
-                 f"{_num(c['input_tokens'])}->{_num(c['output_tokens'])}",
-                 _money(c["cost_usd"]),
-                 _clip(c["tools"] or "-", 20 if compact else 28)]
+                [
+                    _time(c["ts_ms"]),
+                    _clip(c["model"] or "-", 18 if compact else 24),
+                    f"{_num(c['input_tokens'])}->{_num(c['output_tokens'])}",
+                    _money(c["cost_usd"]),
+                    _clip(c["tools"] or "-", 20 if compact else 28),
+                ]
                 for c in recent
             ]
             if not compact:
-                rows = [[*row[:4], str(recent[i]["status_code"] or 200), *row[4:]] for i, row in enumerate(rows)]
+                rows = [
+                    [*row[:4], str(recent[i]["status_code"] or 200), *row[4:]]
+                    for i, row in enumerate(rows)
+                ]
             out.append(_indent(_table(headers, rows, width - 2), "  "))
 
     out.extend(["", _section("tool hotspots")])
     if global_tools:
         max_tokens = max(int(r["total_tokens"] or 0) for r in global_tools) or 1
-        out.append(_table(["tool", "calls", "args", "results", "total", "share"], [
-            [_clip(r["tool_name"], 34), str(r["calls"]), _num(r["arg_tokens"]),
-             _num(r["result_tokens"]), _num(r["total_tokens"]),
-             _bar(int(r["total_tokens"] or 0), max_tokens, 18)]
-            for r in global_tools
-        ], width))
+        out.append(
+            _table(
+                ["tool", "calls", "args", "results", "total", "share"],
+                [
+                    [
+                        _clip(r["tool_name"], 34),
+                        str(r["calls"]),
+                        _num(r["arg_tokens"]),
+                        _num(r["result_tokens"]),
+                        _num(r["total_tokens"]),
+                        _bar(int(r["total_tokens"] or 0), max_tokens, 18),
+                    ]
+                    for r in global_tools
+                ],
+                width,
+            )
+        )
     else:
         out.append("  no completed tool calls recorded yet")
 
@@ -480,19 +586,41 @@ def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
     out.extend(["", _section("live tail")])
     if calls:
         if compact:
-            out.append(_table(["time", "model", "in->out", "cost", "session"], [
-                [_time(r["ts_ms"]), _clip(r["model"] or "-", 18),
-                 f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}",
-                 _money(r["cost_usd"]), _clip(r["session_id"] or "-", 16)]
-                for r in calls
-            ], width))
+            out.append(
+                _table(
+                    ["time", "model", "in->out", "cost", "session"],
+                    [
+                        [
+                            _time(r["ts_ms"]),
+                            _clip(r["model"] or "-", 18),
+                            f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}",
+                            _money(r["cost_usd"]),
+                            _clip(r["session_id"] or "-", 16),
+                        ]
+                        for r in calls
+                    ],
+                    width,
+                )
+            )
         else:
-            out.append(_table(["time", "provider", "model", "in->out", "cost", "st", "session"], [
-                [_time(r["ts_ms"]), r["provider"] or "-", _clip(r["model"] or "-", 28),
-                 f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}", _money(r["cost_usd"]),
-                 str(r["status_code"] or 200), _clip(r["session_id"] or "-", 18)]
-                for r in calls
-            ], width))
+            out.append(
+                _table(
+                    ["time", "provider", "model", "in->out", "cost", "st", "session"],
+                    [
+                        [
+                            _time(r["ts_ms"]),
+                            r["provider"] or "-",
+                            _clip(r["model"] or "-", 28),
+                            f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}",
+                            _money(r["cost_usd"]),
+                            str(r["status_code"] or 200),
+                            _clip(r["session_id"] or "-", 18),
+                        ]
+                        for r in calls
+                    ],
+                    width,
+                )
+            )
     else:
         out.append("  no requests yet")
     return "\n".join(out)
@@ -501,7 +629,11 @@ def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
 def _render_session(con: sqlite3.Connection, session_id: str, limit: int) -> str:
     width = min(max(shutil.get_terminal_size((110, 24)).columns, 72), 140)
     compact = width < 100
-    calls = _query(con, "SELECT * FROM requests WHERE session_id = ? ORDER BY ts_ms ASC LIMIT ?", (session_id, max(limit, 500)))
+    calls = _query(
+        con,
+        "SELECT * FROM requests WHERE session_id = ? ORDER BY ts_ms ASC LIMIT ?",
+        (session_id, max(limit, 500)),
+    )
     out = [_title("tokview session", width), f"session: {session_id}", ""]
     if not calls:
         out.append("no calls in this session")
@@ -513,28 +645,50 @@ def _render_session(con: sqlite3.Connection, session_id: str, limit: int) -> str
     errors = sum(1 for r in calls if int(r["status_code"] or 200) >= 400)
     first = min(int(r["start_ms"] or r["ts_ms"]) for r in calls)
     last = max(int(r["ts_ms"]) for r in calls)
-    out.append(_cards([
-        ("calls", str(len(calls)), f"{errors} errors"),
-        ("cost", _money(cost), "provider billed"),
-        ("tokens", _num(input_tokens + output_tokens), f"{_num(input_tokens)} in / {_num(output_tokens)} out"),
-        ("span", _duration(last - first), f"{_time(first)} -> {_time(last)}"),
-    ], width))
+    out.append(
+        _cards(
+            [
+                ("calls", str(len(calls)), f"{errors} errors"),
+                ("cost", _money(cost), "provider billed"),
+                (
+                    "tokens",
+                    _num(input_tokens + output_tokens),
+                    f"{_num(input_tokens)} in / {_num(output_tokens)} out",
+                ),
+                ("span", _duration(last - first), f"{_time(first)} -> {_time(last)}"),
+            ],
+            width,
+        )
+    )
 
     tools = _session_tools(con, session_id, limit)
     out.extend(["", _section("tool token attribution")])
     if tools:
         max_tokens = max(int(r["total_tokens"] or 0) for r in tools) or 1
-        out.append(_table(["tool", "calls", "args", "results", "total", "share"], [
-            [_clip(r["tool_name"], 34), str(r["calls"]), _num(r["arg_tokens"]),
-             _num(r["result_tokens"]), _num(r["total_tokens"]),
-             _bar(int(r["total_tokens"] or 0), max_tokens, 18)]
-            for r in tools
-        ], width))
+        out.append(
+            _table(
+                ["tool", "calls", "args", "results", "total", "share"],
+                [
+                    [
+                        _clip(r["tool_name"], 34),
+                        str(r["calls"]),
+                        _num(r["arg_tokens"]),
+                        _num(r["result_tokens"]),
+                        _num(r["total_tokens"]),
+                        _bar(int(r["total_tokens"] or 0), max_tokens, 18),
+                    ]
+                    for r in tools
+                ],
+                width,
+            )
+        )
     else:
         out.append("  no completed tool calls recorded yet")
 
     out.extend(["", _section("request timeline")])
-    timeline = _query(con, """
+    timeline = _query(
+        con,
+        """
         SELECT
             r.ts_ms, r.model, r.input_tokens, r.output_tokens, r.latency_ms, r.ttft_ms,
             r.cost_usd, r.status_code, COALESCE(t.tools, '') tools
@@ -547,32 +701,59 @@ def _render_session(con: sqlite3.Connection, session_id: str, limit: int) -> str
         WHERE r.session_id = ?
         ORDER BY r.ts_ms ASC
         LIMIT ?
-    """, (session_id, limit))
+    """,
+        (session_id, limit),
+    )
     if compact:
-        out.append(_table(["time", "model", "in->out", "cost", "tools"], [
-            [_time(r["ts_ms"]), _clip(r["model"] or "-", 18),
-             f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}",
-             _money(r["cost_usd"]), _clip(r["tools"] or "-", 18)]
-            for r in timeline
-        ], width))
+        out.append(
+            _table(
+                ["time", "model", "in->out", "cost", "tools"],
+                [
+                    [
+                        _time(r["ts_ms"]),
+                        _clip(r["model"] or "-", 18),
+                        f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}",
+                        _money(r["cost_usd"]),
+                        _clip(r["tools"] or "-", 18),
+                    ]
+                    for r in timeline
+                ],
+                width,
+            )
+        )
     else:
-        out.append(_table(["time", "model", "in->out", "latency", "ttft", "cost", "st", "tools"], [
-            [_time(r["ts_ms"]), _clip(r["model"] or "-", 24),
-             f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}",
-             _duration(r["latency_ms"]), _duration(r["ttft_ms"]),
-             _money(r["cost_usd"]), str(r["status_code"] or 200), _clip(r["tools"] or "-", 26)]
-            for r in timeline
-        ], width))
+        out.append(
+            _table(
+                ["time", "model", "in->out", "latency", "ttft", "cost", "st", "tools"],
+                [
+                    [
+                        _time(r["ts_ms"]),
+                        _clip(r["model"] or "-", 24),
+                        f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}",
+                        _duration(r["latency_ms"]),
+                        _duration(r["ttft_ms"]),
+                        _money(r["cost_usd"]),
+                        str(r["status_code"] or 200),
+                        _clip(r["tools"] or "-", 26),
+                    ]
+                    for r in timeline
+                ],
+                width,
+            )
+        )
     return "\n".join(out)
 
 
 def _agg(con: sqlite3.Connection, since_ms: int, until_ms: int) -> dict[str, int | float]:
-    row = con.execute("""
+    row = con.execute(
+        """
         SELECT COALESCE(SUM(cost_usd), 0) cost_usd, COUNT(*) requests,
                COALESCE(SUM(input_tokens + output_tokens), 0) tokens,
                COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) errors
         FROM requests WHERE ts_ms BETWEEN ? AND ?
-    """, (since_ms, until_ms)).fetchone()
+    """,
+        (since_ms, until_ms),
+    ).fetchone()
     return dict(row) if row else {"cost_usd": 0.0, "requests": 0, "tokens": 0, "errors": 0}
 
 
@@ -593,17 +774,25 @@ def _latest_session_id(con: sqlite3.Connection) -> str | None:
 
 
 def _session_tools(con: sqlite3.Connection, session_id: str, limit: int) -> list[sqlite3.Row]:
-    return _query(con, """
+    return _query(
+        con,
+        """
         SELECT tool_name, COUNT(*) calls, COALESCE(SUM(arg_tokens), 0) arg_tokens,
                COALESCE(SUM(result_tokens), 0) result_tokens,
                COALESCE(SUM(total_tokens), 0) total_tokens
         FROM tool_calls WHERE session_id = ?
         GROUP BY tool_name ORDER BY total_tokens DESC LIMIT ?
-    """, (session_id, limit))
+    """,
+        (session_id, limit),
+    )
 
 
-def _session_recent_calls(con: sqlite3.Connection, session_id: str, limit: int) -> list[sqlite3.Row]:
-    return _query(con, """
+def _session_recent_calls(
+    con: sqlite3.Connection, session_id: str, limit: int
+) -> list[sqlite3.Row]:
+    return _query(
+        con,
+        """
         SELECT
             r.ts_ms, r.model, r.input_tokens, r.output_tokens, r.cost_usd, r.status_code,
             COALESCE(t.tools, '') tools
@@ -616,7 +805,9 @@ def _session_recent_calls(con: sqlite3.Connection, session_id: str, limit: int) 
         WHERE r.session_id = ?
         ORDER BY r.ts_ms DESC
         LIMIT ?
-    """, (session_id, limit))
+    """,
+        (session_id, limit),
+    )
 
 
 def _utc_today_start_ms() -> int:
@@ -640,8 +831,7 @@ def _section(text: str) -> str:
 def _cards(cards: list[tuple[str, str, str]], width: int) -> str:
     card_w = max(18, min(28, (width - 3 * (len(cards) - 1)) // len(cards)))
     return "\n".join(
-        "   ".join(part.ljust(card_w) for part in row)
-        for row in zip(*cards, strict=True)
+        "   ".join(part.ljust(card_w) for part in row) for row in zip(*cards, strict=True)
     )
 
 
@@ -649,11 +839,20 @@ def _rank_table(rows: list[sqlite3.Row], label_col: str, width: int) -> str:
     if not rows:
         return "  no data yet"
     max_cost = max(float(r["cost_usd"] or 0) for r in rows) or 1.0
-    return _table([label_col, "calls", "tokens", "cost", "share"], [
-        [_clip(r[label_col] or "-", 40), str(r["requests"]), _num(r["tokens"]),
-         _money(r["cost_usd"]), _bar(float(r["cost_usd"] or 0), max_cost, 18)]
-        for r in rows
-    ], width)
+    return _table(
+        [label_col, "calls", "tokens", "cost", "share"],
+        [
+            [
+                _clip(r[label_col] or "-", 40),
+                str(r["requests"]),
+                _num(r["tokens"]),
+                _money(r["cost_usd"]),
+                _bar(float(r["cost_usd"] or 0), max_cost, 18),
+            ]
+            for r in rows
+        ],
+        width,
+    )
 
 
 def _table(headers: list[str], rows: list[list[str]], width: int) -> str:

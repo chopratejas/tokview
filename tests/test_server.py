@@ -1,4 +1,5 @@
 """Tests for tokview's LiteLLM proxy boundary."""
+
 from __future__ import annotations
 
 import json
@@ -34,6 +35,7 @@ from tokview.server import _litellm_provider_prefix, _rewrite_model_body, normal
 )
 def test_normalize_litellm_model_prefixes_common_bare_models(model: str, normalized: str):
     assert normalize_litellm_model(model) == normalized
+
 
 def test_litellm_provider_prefix_uses_litellm_registry_when_available():
     assert _litellm_provider_prefix("gpt-4o-mini") == "openai/gpt-4o-mini"

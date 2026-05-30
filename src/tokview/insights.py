@@ -10,6 +10,7 @@ We never call an LLM to "analyze" anything — every number here is computed
 arithmetic over data we already stored. That keeps it fast, free, private,
 and reproducible.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -25,6 +26,7 @@ Row = dict[str, Any]
 
 
 # --- pricing helpers -------------------------------------------------------
+
 
 def _strip_provider(model: str) -> str:
     """`anthropic/claude-3-5-sonnet` -> `claude-3-5-sonnet`."""
@@ -54,9 +56,9 @@ def _supports_caching(model: str, pricing: PricingMap) -> bool:
 # --- insight generators ----------------------------------------------------
 
 # Tunables. Conservative on purpose: we'd rather under-surface than nag.
-_MIN_REPEATS = 3          # how many similar uncached calls before we flag
+_MIN_REPEATS = 3  # how many similar uncached calls before we flag
 _MIN_INPUT_TOKENS = 1024  # only worth caching reasonably large prompts
-_MIN_SAVINGS_USD = 0.01   # don't bother surfacing sub-cent opportunities
+_MIN_SAVINGS_USD = 0.01  # don't bother surfacing sub-cent opportunities
 
 
 def caching_opportunity(rows: list[Row], pricing: PricingMap) -> list[Insight]:
@@ -75,7 +77,9 @@ def caching_opportunity(rows: list[Row], pricing: PricingMap) -> list[Insight]:
             continue
         model = r.get("model") or ""
         in_tok = int(r.get("input_tokens") or 0)
-        used_cache = (int(r.get("cache_read_tokens") or 0) + int(r.get("cache_creation_tokens") or 0)) > 0
+        used_cache = (
+            int(r.get("cache_read_tokens") or 0) + int(r.get("cache_creation_tokens") or 0)
+        ) > 0
         if in_tok < _MIN_INPUT_TOKENS or used_cache or not _supports_caching(model, pricing):
             continue
         # Round input size to a 512-token bucket so near-identical prompts group.
@@ -87,7 +91,9 @@ def caching_opportunity(rows: list[Row], pricing: PricingMap) -> list[Insight]:
         if len(bucket_rows) < _MIN_REPEATS:
             continue
         prices = unit_prices(model, pricing)
-        per_call_input = sum(int(r.get("input_tokens") or 0) for r in bucket_rows) / len(bucket_rows)
+        per_call_input = sum(int(r.get("input_tokens") or 0) for r in bucket_rows) / len(
+            bucket_rows
+        )
         savable_calls = len(bucket_rows) - 1  # first call writes the cache
         est = savable_calls * per_call_input * (prices["input"] - prices["cache_read"])
         if est < _MIN_SAVINGS_USD:
@@ -196,7 +202,9 @@ def model_whatif(rows: list[Row], pricing: PricingMap) -> list[Insight]:
     Recomputes cost from the stored token counts at the sibling's unit prices.
     Used for a single session's rows (but works on any row set).
     """
-    by_model: dict[str, dict[str, float]] = defaultdict(lambda: {"in": 0.0, "out": 0.0, "cost": 0.0, "n": 0.0})
+    by_model: dict[str, dict[str, float]] = defaultdict(
+        lambda: {"in": 0.0, "out": 0.0, "cost": 0.0, "n": 0.0}
+    )
     for r in rows:
         if r.get("status_code", 200) >= 400:
             continue

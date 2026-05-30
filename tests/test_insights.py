@@ -3,6 +3,7 @@
 All pure functions, fed a fake pricing map so the math is exact and the
 tests never touch LiteLLM or the network.
 """
+
 from __future__ import annotations
 
 from tokview.insights import (
@@ -53,6 +54,7 @@ def _row(**kw):
 
 # ---------- unit_prices ----------
 
+
 def test_unit_prices_strips_provider_prefix():
     p = unit_prices("anthropic/claude-3-5-sonnet-20240620", PRICING)
     assert p["input"] == 3e-6
@@ -65,6 +67,7 @@ def test_unit_prices_unknown_model_is_zeros():
 
 
 # ---------- caching_opportunity ----------
+
 
 def test_caching_opportunity_flags_repeated_uncached_large_prompts():
     rows = [_row() for _ in range(5)]  # 5 identical 2000-token uncached calls
@@ -104,6 +107,7 @@ def test_caching_opportunity_ignores_failures():
 
 # ---------- cache_savings_realized ----------
 
+
 def test_cache_savings_realized_sums_savings():
     # 2000 cache-read tokens x3 keeps total above the $0.01 surfacing floor.
     rows = [_row(cache_read_tokens=2000) for _ in range(3)]
@@ -127,10 +131,16 @@ def test_cache_savings_realized_empty_when_no_caching():
 
 # ---------- model_whatif ----------
 
+
 def test_model_whatif_opus_to_cheaper_sibling():
     # sonnet -> haiku what-if
     rows = [
-        _row(model="anthropic/claude-3-5-sonnet-20240620", input_tokens=10000, output_tokens=2000, cost_usd=0.06)
+        _row(
+            model="anthropic/claude-3-5-sonnet-20240620",
+            input_tokens=10000,
+            output_tokens=2000,
+            cost_usd=0.06,
+        )
         for _ in range(2)
     ]
     out = model_whatif(rows, PRICING)
@@ -148,6 +158,7 @@ def test_model_whatif_no_sibling_no_insight():
 
 
 # ---------- compute_insights (registry) ----------
+
 
 def test_compute_insights_combines_and_sorts():
     rows = [_row() for _ in range(5)] + [_row(cache_read_tokens=2000) for _ in range(3)]

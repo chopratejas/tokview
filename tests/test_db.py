@@ -1,4 +1,5 @@
 """Tests for the SQLite Database layer."""
+
 from __future__ import annotations
 
 import time
@@ -180,9 +181,16 @@ async def test_by_provider_includes_failures_for_visibility(db: Database):
 
 def _tool_row(**ov):
     base = {
-        "tool_call_id": "tc-1", "request_id": "r-1", "session_id": "s1",
-        "ts_ms": _now_ms(), "provider": "anthropic", "model": "claude-3-5-sonnet",
-        "tool_name": "Read", "arg_tokens": 5, "result_tokens": 100, "total_tokens": 105,
+        "tool_call_id": "tc-1",
+        "request_id": "r-1",
+        "session_id": "s1",
+        "ts_ms": _now_ms(),
+        "provider": "anthropic",
+        "model": "claude-3-5-sonnet",
+        "tool_name": "Read",
+        "arg_tokens": 5,
+        "result_tokens": 100,
+        "total_tokens": 105,
     }
     base.update(ov)
     return base
@@ -195,12 +203,16 @@ async def test_tool_calls_insert_and_dedup(db: Database):
 
 
 async def test_session_tool_breakdown(db: Database):
-    await db.insert_tool_calls([
-        _tool_row(tool_call_id="a", tool_name="Read", result_tokens=100, total_tokens=105),
-        _tool_row(tool_call_id="b", tool_name="Read", result_tokens=200, total_tokens=205),
-        _tool_row(tool_call_id="c", tool_name="mcp__gh__search", result_tokens=500, total_tokens=510),
-        _tool_row(tool_call_id="d", session_id="other", tool_name="Bash", total_tokens=999),
-    ])
+    await db.insert_tool_calls(
+        [
+            _tool_row(tool_call_id="a", tool_name="Read", result_tokens=100, total_tokens=105),
+            _tool_row(tool_call_id="b", tool_name="Read", result_tokens=200, total_tokens=205),
+            _tool_row(
+                tool_call_id="c", tool_name="mcp__gh__search", result_tokens=500, total_tokens=510
+            ),
+            _tool_row(tool_call_id="d", session_id="other", tool_name="Bash", total_tokens=999),
+        ]
+    )
     out = await db.session_tool_breakdown("s1")
     by = {t["tool_name"]: t for t in out}
     assert by["Read"]["calls"] == 2
@@ -249,7 +261,9 @@ async def test_latency_percentiles_computes_per_model(db: Database):
 async def test_latency_percentiles_excludes_failures(db: Database):
     now = _now_ms()
     await db.insert_request(_row(request_id="ok", latency_ms=100, ttft_ms=10, ts_ms=now))
-    await db.insert_request(_row(request_id="err", latency_ms=100, ttft_ms=10, ts_ms=now + 1, status_code=500))
+    await db.insert_request(
+        _row(request_id="err", latency_ms=100, ttft_ms=10, ts_ms=now + 1, status_code=500)
+    )
     out = await db.latency_percentiles(0, now + 1000)
     total = sum(r["count"] for r in out)
     assert total == 1  # only the successful call
@@ -275,9 +289,7 @@ async def test_health_metrics(db: Database):
         _row(request_id="unknown", model="vendor/secret-v9", cost_usd=0, status_code=200)
     )
     # Estimated row (from disconnect path)
-    await db.insert_request(
-        _row(request_id="est", cost_usd=0, cost_estimated=1, status_code=500)
-    )
+    await db.insert_request(_row(request_id="est", cost_usd=0, cost_estimated=1, status_code=500))
     m = await db.health_metrics()
     assert m["total_requests"] == 3
     assert m["missing_pricing"] == 1  # the "unknown" row

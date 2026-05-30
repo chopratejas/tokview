@@ -1,4 +1,5 @@
 """Tests for the in-process pub/sub used by SSE."""
+
 from __future__ import annotations
 
 import asyncio

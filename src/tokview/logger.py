@@ -5,6 +5,7 @@ tokview's SQLite. Reads the StandardLoggingPayload (`kwargs["standard_logging_ob
 which LiteLLM populates from the provider's actual `usage` field + the
 pricing map. Cost is ground truth, not an estimate.
 """
+
 from __future__ import annotations
 
 import json
@@ -316,7 +317,7 @@ class TokviewLogger(CustomLogger):
             "ttft_ms": ttft_ms,
             "status_code": status_code,
             "error_message": error_message,
-            "prompt_text": None,   # capture is opt-in (spec §7); not wired yet
+            "prompt_text": None,  # capture is opt-in (spec §7); not wired yet
             "response_text": None,
         }
 
