@@ -226,6 +226,16 @@ def show(session_id: str | None, latest: bool, limit: int, watch: bool) -> None:
             _render_cli_dashboard(tokview.storage.path, session_id=active_session, limit=limit)
         )
         return
+    # Interactive Textual app when attached to a real terminal; fall back to the
+    # plain redraw loop when piped/redirected or if Textual isn't available.
+    if sys.stdout.isatty():
+        try:
+            from .tui import run as run_tui
+
+            run_tui(tokview.storage.path, limit=limit, initial_sid=session_id)
+            return
+        except ImportError:
+            pass
     _watch_cli_dashboard(tokview.storage.path, session_id=active_session, limit=limit)
 
 
