@@ -7,26 +7,35 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11--3.13-blue.svg)](https://www.python.org/downloads/)
 
-A tiny **local** proxy plus a **web dashboard**. Point any app at the proxy with one env var; the dashboard at `localhost:3000` then breaks your token spend down by model, by session, and — uniquely — by *tool call*.
+A tiny **local** proxy plus a **terminal dashboard**. Point any app at the proxy with one env var; `tokview show` then breaks your token spend down by model, by session, and — uniquely — by *tool call*. The browser dashboard is optional; the terminal TUI is the primary workflow and has no Node/npm dependency.
 
 <!--
-  Real dashboard screenshot goes here. Once captured, drop the image in docs/
+  Real terminal screenshot goes here. Once captured, drop the image in docs/
   and uncomment the line below (it can sit above or replace the sketch):
-  ![tokview dashboard](docs/dashboard.png)
+  ![tokview terminal dashboard](docs/tui.png)
 -->
 
-Here's the per-tool breakdown it surfaces (sketch — a real screenshot is coming):
+Here's the per-tool breakdown it surfaces directly in your terminal:
 
 ```text
-  the dashboard · session: claude-code · 47 calls · 2.1M tokens
-  ──────────────────────────────────────────────────────────────────────────────────
-  Read                  ×12   1,240k  ████████████████████████████████████      59%
-  mcp__github__search   ×5      410k  ███████████                               20%
-  Bash                  ×8      180k  █████                                      9%
-  Edit                  ×3       95k  ██                                         4%
-  prompt + messages            175k  █████                                      8%
-  ──────────────────────────────────────────────────────────────────────────────────
-  ⚠  one Read result rode along on 9 later turns — ~140k tokens re-sent as input
+  tokview
+  today spend $0.42      7 day spend $3.18      month spend $9.74
+
+  SESSION SPEND
+  session             calls  tokens   tool tok  errors  cost
+  claude-code-7b3a    47     2.1M     1.9M      0       $2.83
+
+  SESSION REQUEST BREAKDOWNS
+  [session] claude-code-7b3a  47 calls  2.1M tokens  1.9M tool tokens
+    tools: Read 1,240k, mcp__github__search 410k, Bash 180k
+    time      model          in->out      cost    tools
+    14:21:03  claude-opus    180k->2.1k   $0.23   Read:124000, Bash:18000
+
+  TOOL HOTSPOTS
+  tool                  calls  args   results  total
+  Read                  12     4k     1,236k   1,240k
+  mcp__github__search   5      9k     401k     410k
+  Bash                  8      2k     178k     180k
 ```
 
 Most tools just tell you a call used 180k tokens. tokview tells you *which tool* spent them — and catches the dominant hidden agent cost: a big tool result (a `Read`, an MCP dump) re-billed as input on every later turn. Tracing platforms can show this only if you wrap your code in their SDK; tokview gets it from one env var, for any app or CLI you can point at a URL — even Claude Code. No account, no cloud, no Docker.
@@ -72,22 +81,32 @@ Dashboard: http://127.0.0.1:3000
 Point any app at the proxy:
 
 ```bash
-export ANTHROPIC_BASE_URL=http://localhost:4000
-export OPENAI_BASE_URL=http://localhost:4000/v1
-export GOOGLE_BASE_URL=http://localhost:4000
+export ANTHROPIC_BASE_URL=http://127.0.0.1:4000
+export OPENAI_BASE_URL=http://127.0.0.1:4000/v1
+export GOOGLE_BASE_URL=http://127.0.0.1:4000
 ```
 
-Open the dashboard: <http://localhost:3000>.
+Open the terminal dashboard:
 
-Now make calls as usual (Anthropic SDK, OpenAI SDK, `curl`, Claude Code, whatever). They flow through the proxy. The dashboard fills in within milliseconds.
+```bash
+tokview show --watch
+```
+
+Now make calls as usual (Anthropic SDK, OpenAI SDK, `curl`, Claude Code, whatever). They flow through the proxy. `tokview show` updates from the local SQLite database and shows spend by session, request, model, provider, and tool.
+
+The browser dashboard is also available at <http://localhost:3000>, but it is optional. The terminal TUI gives you the core observability without npm, a browser, or a bundled frontend build.
 
 ### Track Claude Code itself
 
 ```bash
-ANTHROPIC_BASE_URL=http://localhost:4000 claude
+ANTHROPIC_BASE_URL=http://127.0.0.1:4000 claude
 ```
 
-Every Claude Code interaction lands in the dashboard.
+Every Claude Code interaction lands in `tokview show`. To inspect one session in detail:
+
+```bash
+tokview show --session <session_id>
+```
 
 ## Why it's different
 
@@ -99,13 +118,15 @@ Three things have to be true at once, and tokview is the only tool we know of wh
 
 ## What it shows
 
-- $ spent today / this week / month-to-date, updating live via SSE — no refresh
-- Per-provider, per-model, per-session, per-tag breakdowns
-- **Session waterfall** — click any session to see every call in it on a timeline, with cost, tokens, latency and TTFT (a trace view for your agent loops)
+- $ spent today / this week / month-to-date in the terminal
+- Per-provider, per-model, and per-session breakdowns
+- **Session spend** — every session with calls, tokens, tool tokens, errors, cost, last activity, and model mix
+- **Request breakdowns** — per-session request timelines with input/output tokens, cost, status, latency and TTFT
 - **Per-tool tokens** — for agent sessions, which tools were called (`Read`, `Bash`, `mcp__…`) and how many tokens each consumed (arguments + results). Token estimates only — catches the big hidden cost: a large tool result re-sent as input on every later turn.
-- **Savings coach** — deterministic, local tips: repeated prompts you could cache, caching savings already realized, cheaper-model what-ifs. No model is called to produce these; it's arithmetic over your own data.
-- **Latency & TTFT** — time-to-first-token, total latency, and tokens/sec per model (p50/p95), plus per-call in the live tail
-- Cache-hit visibility (Anthropic prompt caching, OpenAI cached input tokens, Gemini context cache) and reasoning-token costs (o-series, Claude extended thinking)
+- **Tool hotspots** — the tools responsible for the most token volume across all sessions
+- **Latency & TTFT** — time-to-first-token, total latency, and tokens/sec per model (p50/p95), plus per-call in the session detail view
+- Cache-hit and reasoning-token fields are captured in SQLite for export/API use. The terminal TUI focuses on the session/request/tool views you need while an agent is running.
+- Optional browser/API views can add richer charts and savings analysis over the same local database.
 
 ## What it doesn't do (intentionally)
 
@@ -122,8 +143,9 @@ Want any of these? Open an issue. The architecture is designed to evolve into a 
 ```
 Your apps ──► tokview ──► Provider APIs
                        │
-                       ├─ writes a row → SQLite
-                       └─ pushes a spend event → SSE → Dashboard
+                       ├─ writes rows → SQLite
+                       ├─ tokview show reads SQLite directly
+                       └─ optional browser dashboard reads the same data
 ```
 
 The proxy reads the exact token usage and cost from each provider's response object — Anthropic's `cache_creation_input_tokens` / `cache_read_input_tokens`, OpenAI's `prompt_tokens_details.cached_tokens`, Gemini's `usageMetadata`, the reasoning-tokens fields on o-series and Claude extended-thinking — and applies the right pricing tier for each. **Cost is provider-truth, not a tokenizer estimate.**
@@ -135,7 +157,9 @@ Your SDK doesn't know it's talking to a proxy. The response bytes are forwarded 
 ## CLI
 
 ```
-tokview start [-f]            start the proxy + dashboard (daemonizes; -f for foreground)
+tokview start [-f]            start the proxy + optional browser dashboard
+tokview show [-w]             terminal dashboard: sessions, requests, tools, spend
+tokview show --session ID     detailed request/tool breakdown for one session
 tokview stop                  graceful SIGTERM
 tokview status                pid, uptime, request counts, errors, diagnostics
 tokview logs [-f] [-n N]      tail the server log
