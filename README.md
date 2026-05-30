@@ -68,14 +68,15 @@ You'll see:
 
 ```
 +--------------------------------------------------------------------------+
-| tokview v0.0.3                                               |
+| tokview v0.0.4                                               |
 |                                                                          |
 |   started in background (pid 12345)                                      |
 +--------------------------------------------------------------------------+
 
+Next: tokview show --watch
 Logs: /Users/you/.tokview/tokview.log
 Proxy: http://127.0.0.1:4000
-Dashboard: http://127.0.0.1:3000
+Browser dashboard (optional): http://127.0.0.1:3000
 ```
 
 Point any app at the proxy:

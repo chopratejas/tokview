@@ -7,12 +7,37 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.0.3] — 2026-05-30
+## [0.0.4] — 2026-05-30
+
+### Added
+- Add `tokview show`, a terminal-first TUI for token spend by session, request,
+  model, provider, and tool call.
+- Add `tokview show --watch`, `tokview show --latest`, and
+  `tokview show --session latest` for live and most-recent-session workflows.
+- Add per-session request breakdowns and copyable session inspection commands
+  directly in the terminal UI.
+- Expand zero-config LiteLLM routing for common bare model names across OpenAI,
+  Anthropic, Gemini, Mistral, Cohere, DeepSeek, xAI, Perplexity, Groq, and
+  OpenRouter.
+
+### Changed
+- Make the terminal TUI the primary documented workflow; the browser dashboard
+  remains optional.
+- Make `tokview start` print `tokview show --watch` as the primary next step
+  and label the web UI as the optional browser dashboard.
+- Generate LiteLLM provider wildcard groups for the common providers above.
+- Format Python sources with Ruff.
 
 ### Fixed
 - Cap package metadata at Python `<3.14` because LiteLLM's proxy stack does not
   currently resolve on Python 3.14. This makes `pipx` fail early with an
   accurate Python-version error instead of a dependency-resolution conflict.
+- Normalize Claude Code's current bare model aliases, including
+  `claude-opus-4-8`, before LiteLLM routing so they do not fail with
+  "LLM Provider NOT provided".
+- Keep bare Gemini model names on LiteLLM's `gemini/` provider for the common
+  `GOOGLE_API_KEY` setup instead of allowing registry resolution to drift to
+  Vertex AI.
 
 ## [0.0.2] — 2026-05-29
 
@@ -74,7 +99,7 @@ First release. A small, local, single-user token viewer.
 - Default bind `127.0.0.1`. A non-loopback bind requires `--allow-remote` on
   the CLI **and** the corresponding config setting.
 
-[Unreleased]: https://github.com/chopratejas/tokview/compare/v0.0.3...HEAD
-[0.0.3]: https://github.com/chopratejas/tokview/compare/v0.0.2...v0.0.3
+[Unreleased]: https://github.com/chopratejas/tokview/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/chopratejas/tokview/compare/v0.0.2...v0.0.4
 [0.0.2]: https://github.com/chopratejas/tokview/releases/tag/v0.0.2
 [0.0.1]: https://github.com/chopratejas/tokview/releases/tag/v0.0.1
