@@ -7,9 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11--3.13-blue.svg)](https://www.python.org/downloads/)
 
-[![tokview terminal TUI demo: live spend, sessions, drill-downs, cache reads, and tool hotspots](docs/images/tokview-demo.gif)](docs/images/tokview-demo.mp4)
-
-*Full-resolution MP4 (with audio, scrubbable): [docs/images/tokview-demo.mp4](docs/images/tokview-demo.mp4) — click the GIF above to open it.*
+![tokview terminal TUI demo: live spend, sessions, drill-downs, cache reads, and tool hotspots](docs/images/tokview-demo.gif)
 
 A Codex or Claude Code session burns through millions of tokens, and all you get back is a bill — or, on a subscription, nothing at all. **tokview** is a tiny local proxy that sits in front of your agent and shows you, *as it runs*, exactly where the tokens go: by session, by request, by model, and — uniquely — **by tool call**. No account, no cloud, no code changes.
 
