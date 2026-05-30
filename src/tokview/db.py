@@ -408,6 +408,30 @@ class Database:
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
+    async def global_tool_breakdown(self, limit: int = 12) -> list[dict[str, Any]]:
+        """Top tools across all sessions by total token estimate."""
+        async with self.conn.execute(
+            """
+            SELECT
+                tool_name,
+                COUNT(*)                          AS calls,
+                COALESCE(SUM(arg_tokens), 0)      AS arg_tokens,
+                COALESCE(SUM(result_tokens), 0)   AS result_tokens,
+                COALESCE(SUM(total_tokens), 0)    AS total_tokens
+            FROM tool_calls
+            GROUP BY tool_name
+            ORDER BY total_tokens DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def total_tool_tokens(self) -> int:
+        async with self.conn.execute("SELECT COALESCE(SUM(total_tokens), 0) FROM tool_calls") as cur:
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
+
     async def count_tool_calls(self) -> int:
         async with self.conn.execute("SELECT COUNT(*) FROM tool_calls") as cur:
             row = await cur.fetchone()

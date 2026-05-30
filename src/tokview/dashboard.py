@@ -231,6 +231,26 @@ def build_app(db: Database, pubsub: PubSub | None = None) -> FastAPI:
         total = round(sum(i.get("estimated_savings_usd", 0.0) for i in items), 4)
         return JSONResponse({"insights": items, "total_estimated_savings_usd": total})
 
+    @app.get("/api/tools")
+    async def tools(limit: int = Query(default=12, ge=1, le=100)) -> JSONResponse:
+        """Global tool hotspots — top tools by token estimate, plus a hotspot
+        callout when one tool dominates (the re-sent-result cost)."""
+        rows = await db.global_tool_breakdown(limit)
+        total = await db.total_tool_tokens()
+        hotspot = None
+        if rows and total > 0:
+            top = rows[0]
+            share = round(100 * int(top["total_tokens"] or 0) / total, 1)
+            if share >= 40:
+                hotspot = {
+                    "tool_name": top["tool_name"],
+                    "total_tokens": int(top["total_tokens"] or 0),
+                    "share_pct": share,
+                }
+        return JSONResponse(
+            {"tools": rows, "total_tool_tokens": total, "hotspot": hotspot}
+        )
+
     @app.get("/api/latency")
     async def latency(
         since: int = Query(default=None),

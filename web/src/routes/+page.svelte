@@ -2,9 +2,9 @@
   import { onMount, onDestroy } from 'svelte';
   import {
     fetchSummary, fetchCalls, fetchProviders, fetchModels, fetchSessions,
-    fetchInsights, fetchLatency, fetchSessionDetail, subscribe
+    fetchInsights, fetchLatency, fetchTools, fetchSessionDetail, subscribe
   } from '$lib/api.js';
-  import { fmtUsd, fmtUsdSmall, fmtNum, fmtTs, truncate } from '$lib/format.js';
+  import { fmtUsd, fmtUsdSmall, fmtNum, fmtTs, truncate, midTruncate, fmtCost } from '$lib/format.js';
 
   // ---------- state ----------
   let summary = $state(null);
@@ -15,6 +15,9 @@
   let insights = $state([]);
   let totalSavings = $state(0);
   let latency = $state([]);
+  let tools = $state([]);
+  let toolTokensTotal = $state(0);
+  let toolHotspot = $state(null);
   let connected = $state(false);
   let chartEl;
   let chart;          // ECharts instance
@@ -95,14 +98,15 @@
   // ---------- helpers ----------
   async function refreshAll() {
     try {
-      const [s, c, p, m, ss, ins, lat] = await Promise.all([
+      const [s, c, p, m, ss, ins, lat, tl] = await Promise.all([
         fetchSummary(),
         fetchCalls(20),
         fetchProviders(),
         fetchModels(),
         fetchSessions(),
         fetchInsights(),
-        fetchLatency()
+        fetchLatency(),
+        fetchTools()
       ]);
       summary = s;
       calls = c.calls ?? [];
@@ -112,6 +116,9 @@
       insights = ins.insights ?? [];
       totalSavings = ins.total_estimated_savings_usd ?? 0;
       latency = lat.models ?? [];
+      tools = tl.tools ?? [];
+      toolTokensTotal = tl.total_tool_tokens ?? 0;
+      toolHotspot = tl.hotspot ?? null;
     } catch (e) {
       console.error('refresh failed', e);
     }
@@ -192,6 +199,10 @@
   function pct(v) {
     return mtdCost > 0 ? Math.min(100, (v / mtdCost) * 100) : 0;
   }
+  let maxToolTokens = $derived(Math.max(...tools.map((t) => t.total_tokens || 0), 1));
+  function toolPct(v) {
+    return Math.min(100, ((v || 0) / maxToolTokens) * 100);
+  }
 </script>
 
 <header>
@@ -213,17 +224,17 @@
       </div>
     </div>
     <div class="tile">
-      <div class="label">This Week</div>
-      <div class="value">{fmtUsd(summary?.week?.cost_usd)}</div>
-      <div class="sub">{fmtNum(summary?.week?.requests)} calls</div>
-    </div>
-    <div class="tile">
       <div class="label">Month to date</div>
       <div class="value">{fmtUsd(summary?.mtd?.cost_usd)}</div>
       <div class="sub">{fmtNum(summary?.mtd?.requests)} calls</div>
     </div>
+    <div class="tile accent">
+      <div class="label">Tool tokens</div>
+      <div class="value">{fmtNum(toolTokensTotal)}</div>
+      <div class="sub">spent inside tool calls</div>
+    </div>
     <div class="tile">
-      <div class="label">Cache reads (mtd)</div>
+      <div class="label">Cache reads</div>
       <div class="value">{fmtNum(summary?.mtd?.cache_read_tokens)}</div>
       <div class="sub">tokens served from cache</div>
     </div>
@@ -255,6 +266,43 @@
       </div>
     </div>
   {/if}
+
+  <div class="panel hotspots">
+    <h3>
+      Tool hotspots <span class="hint">where your tokens actually go</span>
+      {#if toolTokensTotal > 0}<span class="savings-pill alt">{fmtNum(toolTokensTotal)} tok</span>{/if}
+    </h3>
+    {#if toolHotspot}
+      <div class="hotspot-callout">
+        ⚠ <strong>{toolHotspot.tool_name}</strong> is {toolHotspot.share_pct}% of your tool tokens
+        ({fmtNum(toolHotspot.total_tokens)}) — likely a large result re-sent across turns.
+      </div>
+    {/if}
+    {#if tools.length === 0}
+      <div class="empty">no tool calls recorded yet — run <code>tokview wrap claude</code> or <code>tokview wrap codex</code></div>
+    {:else}
+      <table>
+        <thead>
+          <tr><th>tool</th><th class="num">calls</th><th class="num">args</th><th class="num">results</th><th class="num">total</th><th>share</th></tr>
+        </thead>
+        <tbody>
+          {#each tools as t}
+            <tr>
+              <td title={t.tool_name}>{truncate(t.tool_name, 34)}</td>
+              <td class="num">{fmtNum(t.calls)}</td>
+              <td class="num muted">{fmtNum(t.arg_tokens)}</td>
+              <td class="num">{fmtNum(t.result_tokens)}</td>
+              <td class="num"><strong>{fmtNum(t.total_tokens)}</strong></td>
+              <td class="share-cell">
+                <span class="tok-bar" style="width: {toolPct(t.total_tokens)}%"></span>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+      <div class="tools-note">Token estimates only — not provider-billed (cache discounts make per-tool dollars misleading).</div>
+    {/if}
+  </div>
 
   <div class="grid-3">
     <div class="panel">
@@ -301,7 +349,7 @@
         {#each sessions as s}
           <button class="row-btn" onclick={() => openWaterfall(s.session_id)}>
             <div class="row">
-              <span class="name" title={s.session_id}>{truncate(s.session_id, 14)}</span>
+              <span class="name" title={s.session_id}>{midTruncate(s.session_id, 16, 8)}</span>
               <span class="meta">{fmtNum(s.requests)}</span>
               <span class="cost">{fmtUsdSmall(s.cost_usd)}</span>
             </div>
@@ -363,12 +411,12 @@
               <td class="num">{fmtNum(r.input_tokens)} → {fmtNum(r.output_tokens)}</td>
               <td class="num muted">{fmtMs(r.ttft_ms)}</td>
               <td class="num muted">{tokPerSec(r) ? tokPerSec(r).toFixed(0) : '—'}</td>
-              <td class="num">{fmtUsdSmall(r.cost_usd)}</td>
+              <td class="num">{fmtCost(r.cost_usd, r.cost_estimated)}</td>
               {#if r.session_id}
                 <td class="muted link" title={r.session_id} role="button" tabindex="0"
                     onclick={() => openWaterfall(r.session_id)}
                     onkeydown={(e) => e.key === 'Enter' && openWaterfall(r.session_id)}>
-                  {truncate(r.session_id, 14)}
+                  {midTruncate(r.session_id, 14, 8)}
                 </td>
               {:else}
                 <td class="muted">—</td>
@@ -398,7 +446,7 @@
       <div class="sheet-head">
         <div>
           <div class="sheet-title">Session trace</div>
-          <div class="sheet-sub" title={waterfall.session_id}>{truncate(waterfall.session_id, 40)}</div>
+          <div class="sheet-sub" title={waterfall.session_id}>{midTruncate(waterfall.session_id, 28, 10)}</div>
         </div>
         <button class="close" onclick={closeWaterfall} aria-label="Close">✕</button>
       </div>
@@ -438,7 +486,7 @@
                   {#if ttftPct > 0}<span class="wf-ttft" style="width: {(ttftPct / widthPct) * 100}%"></span>{/if}
                 </div>
               </div>
-              <div class="wf-cost">{fmtUsdSmall(c.cost_usd)}</div>
+              <div class="wf-cost">{fmtCost(c.cost_usd, c.cost_estimated)}</div>
             </div>
           {/each}
         </div>
@@ -643,6 +691,31 @@
   .card-detail { font-size: 12px; color: var(--text-dim); margin-top: 6px; line-height: 1.45; }
 
   .hint { color: var(--text-dim); font-size: 10px; font-weight: 400; text-transform: none; letter-spacing: 0; opacity: 0.7; }
+
+  /* accent tile (the differentiator metric) */
+  .tile.accent { border-color: var(--accent); }
+  .tile.accent .value { color: var(--accent); }
+
+  /* tool hotspots panel */
+  .hotspots { margin-bottom: 24px; }
+  .hotspots h3 { display: flex; align-items: center; gap: 10px; }
+  .savings-pill.alt {
+    background: rgba(124, 92, 255, 0.15);
+    color: var(--accent);
+    border-color: rgba(124, 92, 255, 0.35);
+  }
+  .hotspot-callout {
+    background: rgba(210, 153, 34, 0.12);
+    border: 1px solid rgba(210, 153, 34, 0.3);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--text);
+    margin-bottom: 12px;
+  }
+  .hotspot-callout strong { color: var(--warn); }
+  .share-cell { width: 30%; }
+  .share-cell .tok-bar { position: static; transform: none; display: block; height: 8px; border-radius: 3px; background: var(--accent); }
 
   /* clickable session rows */
   .row-btn {

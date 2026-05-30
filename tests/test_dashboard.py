@@ -148,6 +148,20 @@ def test_latency_endpoint(client):
     assert isinstance(body["models"], list)
 
 
+def test_tools_endpoint_global_hotspots(client):
+    r = client.get("/api/tools")
+    assert r.status_code == 200
+    body = r.json()
+    assert "tools" in body and "total_tool_tokens" in body and "hotspot" in body
+    # the seeded fixture has one tool call (Read, total 205)
+    tools = {t["tool_name"]: t for t in body["tools"]}
+    assert tools["Read"]["total_tokens"] == 205
+    assert body["total_tool_tokens"] == 205
+    # single tool = 100% share -> hotspot surfaced (>= 40%)
+    assert body["hotspot"] is not None
+    assert body["hotspot"]["tool_name"] == "Read"
+
+
 def test_static_or_inline_index_renders(client):
     r = client.get("/")
     assert r.status_code == 200

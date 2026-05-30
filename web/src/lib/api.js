@@ -49,6 +49,12 @@ export async function fetchLatency() {
   return r.json();
 }
 
+export async function fetchTools() {
+  const r = await fetch('/api/tools');
+  if (!r.ok) throw new Error(`/api/tools -> ${r.status}`);
+  return r.json();
+}
+
 // SSE subscription helper. Returns the EventSource so the caller can close().
 export function subscribe(onSpend, onError) {
   const es = new EventSource('/api/events');
