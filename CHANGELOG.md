@@ -7,6 +7,20 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.5] — 2026-05-30
+
+### Added
+- Document the wrap-first workflow for Codex and Claude Code, with screenshots
+  for the terminal TUI and optional browser dashboard.
+- Add README positioning that compares tokview with provider dashboards, SDK
+  observability tools, log readers, and tokenizer-only counters.
+
+### Changed
+- Clarify that `tokview wrap` is the primary workflow and `tokview show` is the
+  main UI; the browser dashboard is optional.
+- Document current limits around local single-user use, estimated subscription
+  spend, and tool-level token attribution.
+
 ## [0.0.4] — 2026-05-30
 
 ### Added
@@ -99,7 +113,8 @@ First release. A small, local, single-user token viewer.
 - Default bind `127.0.0.1`. A non-loopback bind requires `--allow-remote` on
   the CLI **and** the corresponding config setting.
 
-[Unreleased]: https://github.com/chopratejas/tokview/compare/v0.0.4...HEAD
+[Unreleased]: https://github.com/chopratejas/tokview/compare/v0.0.5...HEAD
+[0.0.5]: https://github.com/chopratejas/tokview/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/chopratejas/tokview/compare/v0.0.2...v0.0.4
 [0.0.2]: https://github.com/chopratejas/tokview/releases/tag/v0.0.2
 [0.0.1]: https://github.com/chopratejas/tokview/releases/tag/v0.0.1

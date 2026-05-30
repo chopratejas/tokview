@@ -9,6 +9,8 @@
 
 tokview is a local proxy plus a live terminal dashboard. It shows spend by session, request, model, cache reads, and tool call, without instrumenting your app or sending data to a hosted service.
 
+Most token counters answer one of these questions: what did my provider bill this month, what did my SDK app emit, or what did Claude Code log after the fact? tokview is built for the harder agent workflow: live Codex and Claude Code sessions, including subscription/OAuth traffic, WebSockets, streaming responses, cache reads, and tool outputs that quietly become tomorrow's input tokens.
+
 ```bash
 tokview wrap codex      # launch Codex through tokview
 tokview wrap claude     # launch Claude Code through tokview
@@ -75,8 +77,8 @@ The browser dashboard is optional, but useful when you want a wider visual summa
 
 | Client | Command | Notes |
 | --- | --- | --- |
-| Codex subscription | `tokview wrap codex` | Routes HTTP and WebSocket Responses traffic through tokview. |
-| Claude Code subscription / OAuth | `tokview wrap claude` | Launches Claude Code through tokview with native Anthropic forwarding. |
+| Codex subscription | `tokview wrap codex` | Routes HTTP and WebSocket Responses traffic through tokview, including ChatGPT-auth Codex backend traffic. |
+| Claude Code subscription / OAuth | `tokview wrap claude` | Launches Claude Code through tokview with native Anthropic forwarding for subscription/OAuth and API-key traffic. |
 | OpenAI-compatible SDKs | `OPENAI_BASE_URL=http://127.0.0.1:4000/v1` | API-key traffic is handled through LiteLLM. |
 | Anthropic-compatible SDKs | `ANTHROPIC_BASE_URL=http://127.0.0.1:4000` | API-key and OAuth-style traffic are normalized into the same views. |
 | Gemini-compatible SDKs | `GOOGLE_BASE_URL=http://127.0.0.1:4000` | Direct proxy mode. |
@@ -96,6 +98,18 @@ tokview shows:
 - command-level hotspots for Codex shell tools, such as `rtk read`, `rtk find`, `pytest`, and `npm`
 
 Tool-level dollars are intentionally not reported. Providers bill per model call, and cache discounts make per-tool cost misleading. tokview reports per-tool token volume instead.
+
+## How tokview is different
+
+| Approach | Good at | Where it falls short for agent work |
+| --- | --- | --- |
+| Provider dashboards | Billing totals and organization-level usage | Not local, not session-first, and usually not tool-result attribution. |
+| SDK observability platforms | Traces for apps you instrument | Requires code/SDK/proxy integration and usually targets API-key app traffic. |
+| Log readers for Claude/Codex | Post-hoc local usage summaries | Not a live proxy, and cannot observe arbitrary SDK traffic. |
+| Generic tokenizers | Estimating prompt size before a call | No provider-truth usage, cache reads, streaming, tool results, or cost. |
+| tokview | Live local proxying for wrapped CLIs and SDKs | Single-user localhost tool today; team/multi-user mode is future work. |
+
+The important distinction: tokview sees traffic as it happens. For Codex and Claude Code, `wrap` handles the client-specific routing so subscription/OAuth traffic and streaming transports still land in the same local SQLite database and TUI.
 
 ## Wrapping CLIs
 
@@ -230,6 +244,13 @@ If full request/response capture is enabled later in config, redact patterns run
 - No account, no cloud service, no telemetry requirement.
 
 See [SECURITY.md](SECURITY.md).
+
+## Current Limits
+
+- tokview is local and single-user today.
+- Subscription costs are shown as estimated equivalent API spend because subscription plans do not bill per request like API-key calls.
+- Tool-level attribution is token volume, not dollars.
+- Browser dashboard is optional; the terminal TUI is the main workflow.
 
 ## Status
 
