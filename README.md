@@ -31,6 +31,21 @@ The browser dashboard is optional. The terminal TUI is the primary interface and
 - **Multiple sessions at once**: run several Codex or Claude terminals; they share one proxy and appear as separate sessions in `tokview show`.
 - **No app instrumentation**: if the client can be pointed at a provider-compatible base URL, tokview can observe it.
 
+
+## Screenshots
+
+### Terminal TUI
+
+The terminal dashboard is the primary tokview experience: sessions, tool hotspots, cache reads, estimated spend, and live request tail in one place.
+
+<img src="docs/images/tokview-tui.png" alt="tokview terminal TUI showing tool hotspots, provider/model mix, cache reads, and live request tail" width="100%">
+
+### Browser Dashboard
+
+The browser dashboard is optional, but useful when you want a wider visual summary of spend, cache usage, provider mix, sessions, and recent calls.
+
+<img src="docs/images/tokview-dashboard.png" alt="tokview browser dashboard showing spend cards, cache reads, provider and model mix, session trace, and live tail" width="100%">
+
 ## Quick Start
 
 Install the command. The PyPI package is named `token-viewer`; the executable is `tokview`.
