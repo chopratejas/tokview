@@ -23,29 +23,28 @@ def build(tokview: TokviewConfig) -> dict[str, Any]:
     rejected before provider routing. These entries match LiteLLM's documented
     wildcard format and keep tokview zero-config for the common SDKs.
     """
+    provider_env = {
+        "openai": "OPENAI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "gemini": "GOOGLE_API_KEY",
+        "mistral": "MISTRAL_API_KEY",
+        "cohere_chat": "COHERE_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+        "xai": "XAI_API_KEY",
+        "perplexity": "PERPLEXITYAI_API_KEY",
+        "groq": "GROQ_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+    }
     return {
         "model_list": [
             {
-                "model_name": "openai/*",
+                "model_name": f"{provider}/*",
                 "litellm_params": {
-                    "model": "openai/*",
-                    "api_key": "os.environ/OPENAI_API_KEY",
+                    "model": f"{provider}/*",
+                    "api_key": f"os.environ/{env_var}",
                 },
-            },
-            {
-                "model_name": "anthropic/*",
-                "litellm_params": {
-                    "model": "anthropic/*",
-                    "api_key": "os.environ/ANTHROPIC_API_KEY",
-                },
-            },
-            {
-                "model_name": "gemini/*",
-                "litellm_params": {
-                    "model": "gemini/*",
-                    "api_key": "os.environ/GOOGLE_API_KEY",
-                },
-            },
+            }
+            for provider, env_var in provider_env.items()
         ],
         "litellm_settings": {
             "always_include_stream_usage": tokview.litellm.always_include_stream_usage,

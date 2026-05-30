@@ -109,3 +109,24 @@ def test_show_session_includes_tool_attribution_and_request_timeline(tmp_path):
     assert "Read" in out
     assert "Read:910" in out
     assert "anthropic/claude-opus" in out
+
+def test_show_latest_selects_most_recent_session(tmp_path):
+    db_path = tmp_path / "tokview.sqlite"
+    now = _now_ms()
+
+    async def seed() -> None:
+        db = Database(db_path)
+        await db.open()
+        await db.insert_request(_request_row(request_id="old", session_id="old-session", ts_ms=now))
+        await db.insert_request(
+            _request_row(request_id="new", session_id="new-session", ts_ms=now + 10)
+        )
+        await db.close()
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(seed())
+
+    out = _render_cli_dashboard(db_path, session_id="latest", limit=5)
+
+    assert "session: new-session" in out

@@ -113,19 +113,40 @@ def normalize_litellm_model(model: Any) -> Any:
 
     SDKs send provider-native model names like ``claude-opus-4-8`` and
     ``gpt-4o-mini``. LiteLLM's proxy wildcard groups route reliably when those
-    are provider-qualified as ``anthropic/...`` or ``openai/...``.
+    are provider-qualified. For less common providers, ask LiteLLM's own model
+    registry; if it can identify the provider, use that provider prefix.
     """
     if not isinstance(model, str):
         return model
     if "/" in model:
         return model
     m = model.lower()
+
+    # Prefer tokview's zero-config provider groups for SDK-native model names.
+    # LiteLLM currently resolves bare Gemini models to vertex_ai in some
+    # releases, but the common local API-key setup is gemini/ + GOOGLE_API_KEY.
     if m.startswith("claude"):
         return f"anthropic/{model}"
     if m.startswith(("gpt-", "o1", "o3", "o4", "o5", "chatgpt-")):
         return f"openai/{model}"
     if m.startswith("gemini"):
         return f"gemini/{model}"
+    if m.startswith(("mistral-", "codestral-")):
+        return f"mistral/{model}"
+    if m.startswith("command-"):
+        return f"cohere_chat/{model}"
+    if m.startswith("deepseek-"):
+        return f"deepseek/{model}"
+    if m.startswith("grok-"):
+        return f"xai/{model}"
+    if m.startswith("sonar-"):
+        return f"perplexity/{model}"
+    if m.startswith("llama-") and m.endswith("-versatile"):
+        return f"groq/{model}"
+
+    detected = _litellm_provider_prefix(model)
+    if detected is not None:
+        return detected
     return model
 
 
@@ -200,3 +221,21 @@ def _rewrite_model_body(body: bytes) -> bytes:
 
 
 _rewrite_anthropic_model_body = _rewrite_model_body
+
+
+def _litellm_provider_prefix(model: str) -> str | None:
+    try:
+        os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+        import litellm
+
+        resolved_model, provider, _, _ = litellm.get_llm_provider(model=model)
+    except Exception:
+        return None
+    if not provider or not isinstance(provider, str):
+        return None
+    provider = "gemini" if provider == "google" else provider
+    if provider == "openai" and model.startswith("openai/"):
+        return model
+    if "/" in str(resolved_model):
+        return str(resolved_model)
+    return f"{provider}/{resolved_model or model}"

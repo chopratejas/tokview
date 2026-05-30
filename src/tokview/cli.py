@@ -59,7 +59,7 @@ def main() -> None:
     help="Allow non-loopback bind addresses. v1 has NO authentication — use only if you accept the risk.",
 )
 def start(foreground: bool, allow_remote: bool) -> None:
-    """Start the proxy and dashboard."""
+    """Start the proxy and optional browser dashboard."""
     tokview = load_config()
 
     # Trust boundary per spec §6.4: non-loopback bind requires both the config value
@@ -101,9 +101,14 @@ def start(foreground: bool, allow_remote: bool) -> None:
         )
         PID_FILE.write_text(str(child.pid))
         proxy_url = f"http://{tokview.proxy.bind}:{tokview.proxy.port}"
-        dash_url = f"http://{tokview.dashboard.bind}:{tokview.dashboard.port}"
+        browser_url = f"http://{tokview.dashboard.bind}:{tokview.dashboard.port}"
         click.echo(_banner_running(tokview, child.pid))
-        click.echo(f"\nLogs: {LOG_FILE}\nProxy: {proxy_url}\nDashboard: {dash_url}")
+        click.echo(
+            f"\nNext: tokview show --watch\n"
+            f"Logs: {LOG_FILE}\n"
+            f"Proxy: {proxy_url}\n"
+            f"Browser dashboard (optional): {browser_url}"
+        )
         return
 
     # Foreground path. If we're the spawned child, our PID is already in the
@@ -172,7 +177,7 @@ def status() -> None:
     click.echo(f"  config:    {DEFAULT_CONFIG_PATH}")
     click.echo(f"  storage:   {tokview.storage.path}")
     click.echo(f"  proxy:     http://{tokview.proxy.bind}:{tokview.proxy.port}")
-    click.echo(f"  dashboard: http://{tokview.dashboard.bind}:{tokview.dashboard.port}")
+    click.echo(f"  browser:   http://{tokview.dashboard.bind}:{tokview.dashboard.port}")
     if running:
         # Fetch diagnostics if we can — quick HTTP call
         try:
@@ -194,9 +199,10 @@ def status() -> None:
 
 @main.command()
 @click.option("--session", "session_id", help="Show one session in detail.")
+@click.option("--latest", is_flag=True, help="Show the most recently active session.")
 @click.option("--limit", type=int, default=20, show_default=True, help="Rows per section.")
 @click.option("--watch", "-w", is_flag=True, help="Refresh every 2 seconds.")
-def show(session_id: str | None, limit: int, watch: bool) -> None:
+def show(session_id: str | None, latest: bool, limit: int, watch: bool) -> None:
     """Render a terminal dashboard from the local SQLite database."""
     tokview = load_config()
     if not tokview.storage.path.exists():
@@ -207,7 +213,8 @@ def show(session_id: str | None, limit: int, watch: bool) -> None:
     while True:
         if watch:
             click.clear()
-        click.echo(_render_cli_dashboard(tokview.storage.path, session_id=session_id, limit=limit))
+        active_session = "latest" if latest else session_id
+        click.echo(_render_cli_dashboard(tokview.storage.path, session_id=active_session, limit=limit))
         if not watch:
             return
         time.sleep(2)
@@ -325,13 +332,16 @@ def _render_cli_dashboard(db_path: Path, session_id: str | None, limit: int) -> 
     con = sqlite3.connect(str(db_path))
     con.row_factory = sqlite3.Row
     try:
+        if session_id == "latest":
+            session_id = _latest_session_id(con)
         return _render_session(con, session_id, limit) if session_id else _render_overview(con, db_path, limit)
     finally:
         con.close()
 
 
 def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
-    width = min(max(shutil.get_terminal_size((110, 24)).columns, 88), 140)
+    width = min(max(shutil.get_terminal_size((110, 24)).columns, 72), 140)
+    compact = width < 100
     now_ms = int(time.time() * 1000)
     today_start = _utc_today_start_ms()
     week_start = now_ms - 7 * 86_400_000
@@ -388,8 +398,8 @@ def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
 
     out = [
         _title("tokview", width),
-        f"db: {db_path}",
-        f"now: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}    refresh: tokview show --watch",
+        f"db: {_clip(db_path, width - 4)}",
+        f"now: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}    live: tokview show --watch",
         "",
         _cards([
             ("today spend", _money(today["cost_usd"]), f"{today['requests']} calls / {_num(today['tokens'])} tok"),
@@ -401,19 +411,28 @@ def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
         _section("session spend"),
     ]
     if sessions:
-        out.append(_table(["session", "calls", "tokens", "tool tok", "errors", "cost", "last", "models"], [
-            [_clip(r["session_id"] or "-", 26), str(r["requests"]), _num(r["tokens"]),
-             _num(r["tool_tokens"]), str(r["errors"]), _money(r["cost_usd"]),
-             _age(r["last_ts_ms"]), _clip(r["models"] or "-", 28)]
-            for r in sessions
-        ], width))
-        out.append("open a session: tokview show --session <session_id>")
+        if compact:
+            out.append(_table(["session", "calls", "tokens", "tools", "cost", "last"], [
+                [_clip(r["session_id"] or "-", 20), str(r["requests"]), _num(r["tokens"]),
+                 _num(r["tool_tokens"]), _money(r["cost_usd"]), _age(r["last_ts_ms"])]
+                for r in sessions
+            ], width))
+        else:
+            out.append(_table(["session", "calls", "tokens", "tool tok", "errors", "cost", "last", "models"], [
+                [_clip(r["session_id"] or "-", 26), str(r["requests"]), _num(r["tokens"]),
+                 _num(r["tool_tokens"]), str(r["errors"]), _money(r["cost_usd"]),
+                 _age(r["last_ts_ms"]), _clip(r["models"] or "-", 28)]
+                for r in sessions
+            ], width))
+        top_session = sessions[0]["session_id"]
+        out.append("latest session: tokview show --latest")
+        out.append(f"copy: tokview show --session {top_session}")
     else:
         out.append("  no sessions yet")
 
     if sessions:
         out.extend(["", _section("session request breakdowns")])
-        for r in sessions[: min(5, limit)]:
+        for r in sessions[: min(3 if compact else 5, limit)]:
             sid = r["session_id"]
             out.append("")
             out.append(
@@ -429,13 +448,17 @@ def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
             else:
                 out.append("  tools: none recorded yet")
             recent = _session_recent_calls(con, sid, 3)
-            out.append(_indent(_table(["time", "model", "in->out", "cost", "st", "tools"], [
-                [_time(c["ts_ms"]), _clip(c["model"] or "-", 24),
+            headers = ["time", "model", "in->out", "cost", "tools"] if compact else ["time", "model", "in->out", "cost", "st", "tools"]
+            rows = [
+                [_time(c["ts_ms"]), _clip(c["model"] or "-", 18 if compact else 24),
                  f"{_num(c['input_tokens'])}->{_num(c['output_tokens'])}",
-                 _money(c["cost_usd"]), str(c["status_code"] or 200),
-                 _clip(c["tools"] or "-", 28)]
+                 _money(c["cost_usd"]),
+                 _clip(c["tools"] or "-", 20 if compact else 28)]
                 for c in recent
-            ], width - 2), "  "))
+            ]
+            if not compact:
+                rows = [[*row[:4], str(recent[i]["status_code"] or 200), *row[4:]] for i, row in enumerate(rows)]
+            out.append(_indent(_table(headers, rows, width - 2), "  "))
 
     out.extend(["", _section("tool hotspots")])
     if global_tools:
@@ -449,25 +472,35 @@ def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
     else:
         out.append("  no completed tool calls recorded yet")
 
-    out.extend(["", _section("provider mix")])
-    out.append(_rank_table(providers, "provider", width))
-    out.extend(["", _section("model mix")])
-    out.append(_rank_table(models, "model", width))
+    if not compact:
+        out.extend(["", _section("provider mix")])
+        out.append(_rank_table(providers, "provider", width))
+        out.extend(["", _section("model mix")])
+        out.append(_rank_table(models, "model", width))
     out.extend(["", _section("live tail")])
     if calls:
-        out.append(_table(["time", "provider", "model", "in->out", "cost", "st", "session"], [
-            [_time(r["ts_ms"]), r["provider"] or "-", _clip(r["model"] or "-", 28),
-             f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}", _money(r["cost_usd"]),
-             str(r["status_code"] or 200), _clip(r["session_id"] or "-", 18)]
-            for r in calls
-        ], width))
+        if compact:
+            out.append(_table(["time", "model", "in->out", "cost", "session"], [
+                [_time(r["ts_ms"]), _clip(r["model"] or "-", 18),
+                 f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}",
+                 _money(r["cost_usd"]), _clip(r["session_id"] or "-", 16)]
+                for r in calls
+            ], width))
+        else:
+            out.append(_table(["time", "provider", "model", "in->out", "cost", "st", "session"], [
+                [_time(r["ts_ms"]), r["provider"] or "-", _clip(r["model"] or "-", 28),
+                 f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}", _money(r["cost_usd"]),
+                 str(r["status_code"] or 200), _clip(r["session_id"] or "-", 18)]
+                for r in calls
+            ], width))
     else:
         out.append("  no requests yet")
     return "\n".join(out)
 
 
 def _render_session(con: sqlite3.Connection, session_id: str, limit: int) -> str:
-    width = min(max(shutil.get_terminal_size((110, 24)).columns, 88), 140)
+    width = min(max(shutil.get_terminal_size((110, 24)).columns, 72), 140)
+    compact = width < 100
     calls = _query(con, "SELECT * FROM requests WHERE session_id = ? ORDER BY ts_ms ASC LIMIT ?", (session_id, max(limit, 500)))
     out = [_title("tokview session", width), f"session: {session_id}", ""]
     if not calls:
@@ -515,13 +548,21 @@ def _render_session(con: sqlite3.Connection, session_id: str, limit: int) -> str
         ORDER BY r.ts_ms ASC
         LIMIT ?
     """, (session_id, limit))
-    out.append(_table(["time", "model", "in->out", "latency", "ttft", "cost", "st", "tools"], [
-        [_time(r["ts_ms"]), _clip(r["model"] or "-", 24),
-         f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}",
-         _duration(r["latency_ms"]), _duration(r["ttft_ms"]),
-         _money(r["cost_usd"]), str(r["status_code"] or 200), _clip(r["tools"] or "-", 26)]
-        for r in timeline
-    ], width))
+    if compact:
+        out.append(_table(["time", "model", "in->out", "cost", "tools"], [
+            [_time(r["ts_ms"]), _clip(r["model"] or "-", 18),
+             f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}",
+             _money(r["cost_usd"]), _clip(r["tools"] or "-", 18)]
+            for r in timeline
+        ], width))
+    else:
+        out.append(_table(["time", "model", "in->out", "latency", "ttft", "cost", "st", "tools"], [
+            [_time(r["ts_ms"]), _clip(r["model"] or "-", 24),
+             f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}",
+             _duration(r["latency_ms"]), _duration(r["ttft_ms"]),
+             _money(r["cost_usd"]), str(r["status_code"] or 200), _clip(r["tools"] or "-", 26)]
+            for r in timeline
+        ], width))
     return "\n".join(out)
 
 
@@ -537,6 +578,18 @@ def _agg(con: sqlite3.Connection, since_ms: int, until_ms: int) -> dict[str, int
 
 def _query(con: sqlite3.Connection, sql: str, args: tuple[object, ...]) -> list[sqlite3.Row]:
     return list(con.execute(sql, args).fetchall())
+
+
+def _latest_session_id(con: sqlite3.Connection) -> str | None:
+    row = con.execute("""
+        SELECT session_id
+        FROM requests
+        WHERE session_id IS NOT NULL
+        GROUP BY session_id
+        ORDER BY MAX(ts_ms) DESC
+        LIMIT 1
+    """).fetchone()
+    return None if row is None else str(row["session_id"])
 
 
 def _session_tools(con: sqlite3.Connection, session_id: str, limit: int) -> list[sqlite3.Row]:
