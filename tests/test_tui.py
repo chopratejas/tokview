@@ -119,6 +119,33 @@ async def test_app_populates_and_navigates(tmp_path):
         assert app.paused is True
 
 
+async def test_drill_in_screen_opens_and_populates(tmp_path):
+    db_path = await _seed(tmp_path)
+    app = TokviewApp(db_path=db_path, limit=10)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        from tokview.tui import SessionScreen
+
+        # `o` opens the full-screen drill-in for the selected (newest) session
+        await pilot.press("o")
+        await pilot.pause()
+        assert isinstance(app.screen, SessionScreen)
+        assert app.screen.sid == "claude-code-7b3a4f"
+
+        from textual.widgets import DataTable
+
+        # query the active (pushed) screen, not the app's base screen
+        dtools = app.screen.query_one("#drill-tools", DataTable)
+        dreqs = app.screen.query_one("#drill-requests", DataTable)
+        assert dtools.row_count == 2  # Read + Bash
+        assert dreqs.row_count == 1
+
+        # esc returns to the master/detail
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, SessionScreen)
+
+
 async def test_app_initial_session_preselected(tmp_path):
     db_path = await _seed(tmp_path)
     app = TokviewApp(db_path=db_path, limit=10, initial_sid="codex-9d2e")

@@ -21,6 +21,7 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
+from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
 
 # Brand palette (matches the web dashboard).
@@ -204,6 +205,137 @@ def fetch_session_requests(con: sqlite3.Connection, sid: str, limit: int = 30) -
 
 
 # --------------------------------------------------------------------------- #
+# drill-in: one session, full screen
+# --------------------------------------------------------------------------- #
+class SessionScreen(Screen):
+    """Full-screen detail for a single session: the complete tool breakdown
+    plus a request latency waterfall. Pushed when you click / press enter on a
+    session, or with `o`. Refreshes live; esc/q goes back."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "back", "Back"),
+        Binding("q", "back", "Back"),
+        Binding("r", "refresh_now", "Refresh"),
+    ]
+
+    def __init__(self, db_path: Path, sid: str) -> None:
+        super().__init__()
+        self.db_path = db_path
+        self.sid = sid
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True)
+        with VerticalScroll(id="drill"):
+            yield Static(id="drill-summary")
+            yield Static("TOOLS  ·  where this session's tokens went", classes="label")
+            yield DataTable(id="drill-tools", cursor_type="none")
+            yield Static("REQUESTS  ·  latency waterfall, newest first", classes="label")
+            yield DataTable(id="drill-requests", cursor_type="none")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.query_one("#drill-tools", DataTable).add_columns(
+            "tool", "calls", "args", "results", "total", "share"
+        )
+        self.query_one("#drill-requests", DataTable).add_columns(
+            "time", "model", "in→out", "ttft", "latency", "cache", "cost"
+        )
+        self.refresh_detail()
+        self.set_interval(REFRESH_SECONDS, self.refresh_detail)
+
+    def _connect(self) -> sqlite3.Connection:
+        con = sqlite3.connect(str(self.db_path))
+        con.row_factory = sqlite3.Row
+        return con
+
+    def refresh_detail(self) -> None:
+        try:
+            con = self._connect()
+        except sqlite3.Error:
+            return
+        try:
+            summary = fetch_session_summary(con, self.sid)
+            tools = fetch_session_tools(con, self.sid, limit=40)
+            reqs = fetch_session_requests(con, self.sid, limit=60)
+        finally:
+            con.close()
+
+        self.sub_title = clip(self.sid, 48)
+        summ = self.query_one("#drill-summary", Static)
+        if not summary:
+            summ.update(Text("session has no requests", style=DIM))
+            return
+        dur = max(0, (summary["last_ts_ms"] - summary["first_ts_ms"]) // 1000)
+        dur_s = f"{dur // 60}m{dur % 60:02d}s" if dur >= 60 else f"{dur}s"
+        head = Text()
+        head.append(clip(self.sid, 60) + "\n", style=f"bold {ACCENT}")
+        head.append(f"{summary['requests']} calls", style="bold")
+        head.append(f"  ·  in {fmt_num(summary['input_tokens'])}", style=DIM)
+        head.append(f"  ·  out {fmt_num(summary['output_tokens'])}", style=DIM)
+        head.append(f"  ·  cache {fmt_num(summary['cache_read'])}", style=CYAN)
+        head.append(f"  ·  {fmt_money(summary['cost_usd'])}", style=cost_color(summary["cost_usd"]))
+        head.append(f"  ·  {dur_s}", style=DIM)
+        if summary["errors"]:
+            head.append(f"  ·  ⚠ {summary['errors']} errors", style=f"bold {BAD}")
+        head.append(f"\n{clip(summary['models'], 90)}", style=DIM)
+        # token-hotspot insight
+        if tools:
+            top = tools[0]
+            tool_total = sum(int(t["total_tokens"] or 0) for t in tools) or 1
+            share = 100 * int(top["total_tokens"] or 0) / tool_total
+            if share >= 40:
+                head.append(
+                    f"\n⚠ {clip(top['tool_name'], 30)} is {share:.0f}% of this session's "
+                    f"tool tokens ({fmt_num(top['total_tokens'])}) — likely re-sent across turns",
+                    style=f"bold {WARN}",
+                )
+        summ.update(head)
+
+        tbl = self.query_one("#drill-tools", DataTable)
+        tbl.clear()
+        max_total = max((int(t["total_tokens"] or 0) for t in tools), default=0)
+        for t in tools:
+            total = int(t["total_tokens"] or 0)
+            tbl.add_row(
+                Text(clip(t["tool_name"], 34), style=ACCENT2),
+                str(t["calls"]),
+                fmt_num(t["arg_tokens"]),
+                fmt_num(t["result_tokens"]),
+                Text(fmt_num(total), style="bold"),
+                Text(bar(total, max_total, 22), style=ACCENT),
+            )
+        if not tools:
+            tbl.add_row(Text("no tool calls recorded yet", style=DIM), "", "", "", "", "")
+
+        rtbl = self.query_one("#drill-requests", DataTable)
+        rtbl.clear()
+        max_lat = max((int(c["latency_ms"] or 0) for c in reqs), default=0)
+        for c in reqs:
+            err = (c["status_code"] or 200) >= 400
+            lat = int(c["latency_ms"] or 0)
+            lat_cell = Text()
+            lat_cell.append(bar(lat, max_lat, 10), style=BAD if err else ACCENT)
+            lat_cell.append(f" {lat}ms" if lat else " -", style=DIM)
+            rtbl.add_row(
+                Text(fmt_time(c["ts_ms"]), style=DIM),
+                Text(clip(c["model"], 24), style=BAD if err else "white"),
+                f"{fmt_num(c['input_tokens'])}→{fmt_num(c['output_tokens'])}",
+                Text(f"{c['ttft_ms']}ms" if c["ttft_ms"] else "-", style=DIM),
+                lat_cell,
+                Text(fmt_num(c["cache_read_tokens"]), style=CYAN if c["cache_read_tokens"] else DIM),
+                Text(fmt_money(c["cost_usd"], c["cost_estimated"]), style=cost_color(c["cost_usd"])),
+            )
+        if not reqs:
+            rtbl.add_row(Text("no requests", style=DIM), "", "", "", "", "", "")
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+    def action_refresh_now(self) -> None:
+        self.refresh_detail()
+
+
+# --------------------------------------------------------------------------- #
 # the app
 # --------------------------------------------------------------------------- #
 class TokviewApp(App):
@@ -239,10 +371,17 @@ class TokviewApp(App):
     DataTable { height: auto; background: #0e1117; }
     #tools > .datatable--header,
     #requests > .datatable--header { color: #8b949e; text-style: bold; }
+
+    /* full-screen session drill-in */
+    #drill { padding: 1 2; }
+    #drill-summary { height: auto; padding: 0 0 1 0; border-bottom: solid #2a313c; }
+    #drill-tools > .datatable--header,
+    #drill-requests > .datatable--header { color: #8b949e; text-style: bold; }
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("q", "quit", "Quit"),
+        Binding("o", "drill", "Open session"),
         Binding("p", "toggle_pause", "Pause"),
         Binding("r", "refresh_now", "Refresh"),
         Binding("g", "jump_top", "Top"),
@@ -421,6 +560,7 @@ class TokviewApp(App):
 
     # ---- events ----
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        # arrows + click move the cursor → preview that session in the side pane
         if event.data_table.id != "sessions":
             return
         sid = event.row_key.value
@@ -431,6 +571,21 @@ class TokviewApp(App):
                 self._render_detail(con, sid)
             finally:
                 con.close()
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        # click or enter on a session → open the full-screen drill-in
+        if event.data_table.id != "sessions":
+            return
+        sid = event.row_key.value
+        if sid:
+            self._open_session(sid)
+
+    def _open_session(self, sid: str) -> None:
+        self.push_screen(SessionScreen(self.db_path, sid))
+
+    def action_drill(self) -> None:
+        if self.current_sid:
+            self._open_session(self.current_sid)
 
     # ---- actions ----
     def action_toggle_pause(self) -> None:
