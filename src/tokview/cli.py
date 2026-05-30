@@ -5,6 +5,7 @@ Commands:
     tokview stop
     tokview status
     tokview show [--session SESSION_ID] [--watch]
+    tokview wrap codex|claude [-- ARGS...]
     tokview logs [--tail]
     tokview export --since YYYY-MM-DD [--format csv|json]
     tokview reset [--yes]
@@ -46,7 +47,7 @@ def main() -> None:
     """Command group."""
 
 
-@main.command()
+@main.command(hidden=True)
 @click.option(
     "--foreground",
     "-f",
@@ -135,7 +136,7 @@ def start(foreground: bool, allow_remote: bool) -> None:
                 pass
 
 
-@main.command()
+@main.command(hidden=True)
 def stop() -> None:
     """Stop a running tokview process."""
     pid = _read_pid()
@@ -219,16 +220,13 @@ def show(session_id: str | None, latest: bool, limit: int, watch: bool) -> None:
     if limit < 1:
         raise click.ClickException("--limit must be >= 1")
 
-    while True:
-        if watch:
-            click.clear()
-        active_session = "latest" if latest else session_id
+    active_session = "latest" if latest else session_id
+    if not watch:
         click.echo(
             _render_cli_dashboard(tokview.storage.path, session_id=active_session, limit=limit)
         )
-        if not watch:
-            return
-        time.sleep(2)
+        return
+    _watch_cli_dashboard(tokview.storage.path, session_id=active_session, limit=limit)
 
 
 @main.command()
@@ -285,6 +283,63 @@ def export(since: str, fmt: str) -> None:
             writer.writerow({k: r[k] for k in rows[0].keys()})
 
 
+@main.group(context_settings={"help_option_names": ["-h", "--help"]})
+def wrap() -> None:
+    """Launch supported CLIs through tokview."""
+
+
+@wrap.command(context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
+@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+def codex(args: tuple[str, ...]) -> None:
+    """Start tokview and launch OpenAI Codex through it."""
+    tokview = load_config()
+    _ensure_tokview_started()
+    port = tokview.proxy.port
+    _inject_codex_provider_config(port)
+    codex_bin = shutil.which("codex")
+    if not codex_bin:
+        raise click.ClickException("'codex' not found in PATH")
+    env = dict(os.environ)
+    env["OPENAI_BASE_URL"] = f"http://127.0.0.1:{port}/v1"
+    click.echo(f"tokview: launching codex via http://127.0.0.1:{port}/v1")
+    raise SystemExit(subprocess.call([codex_bin, *args], env=env))
+
+
+@wrap.command(context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
+@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+def claude(args: tuple[str, ...]) -> None:
+    """Start tokview and launch Claude Code through it."""
+    tokview = load_config()
+    _ensure_tokview_started()
+    proxy_url = f"http://127.0.0.1:{tokview.proxy.port}"
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        raise click.ClickException("'claude' not found in PATH")
+    env = dict(os.environ)
+    env["ANTHROPIC_BASE_URL"] = proxy_url
+    click.echo(f"tokview: launching claude via {proxy_url}")
+    raise SystemExit(subprocess.call([claude_bin, *args], env=env))
+
+
+@main.group()
+def unwrap() -> None:
+    """Undo durable tokview wrapping for supported tools."""
+
+
+@unwrap.command(name="codex")
+def unwrap_codex() -> None:
+    """Restore Codex config changed by `tokview wrap codex`."""
+    status, config_file = _restore_codex_provider_config()
+    if status == "restored":
+        click.echo(f"restored {config_file} from tokview backup")
+    elif status == "cleaned":
+        click.echo(f"removed tokview blocks from {config_file}")
+    elif status == "removed":
+        click.echo(f"removed tokview-only {config_file}")
+    else:
+        click.echo(f"no tokview Codex config found in {config_file}")
+
+
 @main.command()
 @click.option("--yes", is_flag=True, help="Skip confirmation.")
 def reset(yes: bool) -> None:
@@ -326,6 +381,92 @@ def config_path() -> None:
 # ----- helpers -----
 
 
+_CODEX_TOP_LEVEL_MARKER = "# --- tokview proxy (auto-injected by tokview wrap codex) ---"
+_CODEX_END_MARKER = "# --- end tokview ---"
+_CODEX_CONFIG_BACKUP_SUFFIX = ".tokview-backup"
+
+
+def _ensure_tokview_started() -> None:
+    pid = _read_pid()
+    if pid and _pid_running(pid):
+        return
+    result = subprocess.run([sys.argv[0], "start"], text=True)
+    if result.returncode != 0:
+        raise click.ClickException("failed to start tokview")
+
+
+def _codex_config_paths() -> tuple[Path, Path]:
+    config_dir = Path.home() / ".codex"
+    config_file = config_dir / "config.toml"
+    return config_file, config_dir / f"config.toml{_CODEX_CONFIG_BACKUP_SUFFIX}"
+
+
+def _strip_codex_tokview_blocks(content: str) -> str:
+    def remove_span(text: str) -> str:
+        while _CODEX_TOP_LEVEL_MARKER in text and _CODEX_END_MARKER in text:
+            start = text.index(_CODEX_TOP_LEVEL_MARKER)
+            end_idx = text.index(_CODEX_END_MARKER, start)
+            end = end_idx + len(_CODEX_END_MARKER)
+            text = text[:start].rstrip("\n") + "\n" + text[end:].lstrip("\n")
+        return text
+
+    cleaned = remove_span(content)
+    return cleaned.lstrip("\n").rstrip() + "\n" if cleaned.strip() else ""
+
+
+def _inject_codex_provider_config(port: int) -> None:
+    config_file, backup_file = _codex_config_paths()
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    if config_file.exists() and not backup_file.exists():
+        content = config_file.read_text()
+        if _CODEX_TOP_LEVEL_MARKER not in content:
+            shutil.copy2(config_file, backup_file)
+    user_content = (
+        _strip_codex_tokview_blocks(config_file.read_text()) if config_file.exists() else ""
+    )
+    top_level = (
+        f"{_CODEX_TOP_LEVEL_MARKER}\n"
+        'model_provider = "tokview"\n'
+        f'openai_base_url = "http://127.0.0.1:{port}/v1"\n'
+        f"{_CODEX_END_MARKER}\n"
+    )
+    provider = (
+        f"{_CODEX_TOP_LEVEL_MARKER}\n"
+        "[model_providers.tokview]\n"
+        'name = "OpenAI via tokview"\n'
+        f'base_url = "http://127.0.0.1:{port}/v1"\n'
+        "supports_websockets = true\n"
+        f"{_CODEX_END_MARKER}\n"
+    )
+    body = (
+        top_level
+        + "\n"
+        + (user_content.strip() + "\n\n" if user_content.strip() else "")
+        + provider
+    )
+    config_file.write_text(body)
+    click.echo(f"tokview: configured Codex proxy in {config_file}")
+
+
+def _restore_codex_provider_config() -> tuple[str, Path]:
+    config_file, backup_file = _codex_config_paths()
+    if backup_file.exists():
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(backup_file, config_file)
+        backup_file.unlink()
+        return "restored", config_file
+    if config_file.exists():
+        content = config_file.read_text()
+        if _CODEX_TOP_LEVEL_MARKER in content:
+            cleaned = _strip_codex_tokview_blocks(content)
+            if cleaned.strip():
+                config_file.write_text(cleaned)
+                return "cleaned", config_file
+            config_file.unlink()
+            return "removed", config_file
+    return "noop", config_file
+
+
 def _read_pid() -> int | None:
     if not PID_FILE.exists():
         return None
@@ -344,6 +485,26 @@ def _pid_running(pid: int) -> bool:
         # Process exists but we don't own it; rare on a laptop.
         return True
     return True
+
+
+def _watch_cli_dashboard(db_path: Path, session_id: str | None, limit: int) -> None:
+    # Alternate screen + cursor-home redraw prevents scrollback appends and flicker.
+    out = sys.stdout
+    out.write("\033[?1049h\033[?25l")
+    out.flush()
+    try:
+        while True:
+            frame = _render_cli_dashboard(db_path, session_id=session_id, limit=limit)
+            out.write("\033[H\033[2J")
+            out.write(frame)
+            out.write("\033[J")
+            out.flush()
+            time.sleep(2)
+    except KeyboardInterrupt:
+        return
+    finally:
+        out.write("\033[?25h\033[?1049l")
+        out.flush()
 
 
 def _render_cli_dashboard(db_path: Path, session_id: str | None, limit: int) -> str:
@@ -419,7 +580,8 @@ def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
     calls = _query(
         con,
         """
-        SELECT ts_ms, provider, model, session_id, input_tokens, output_tokens, cost_usd, status_code
+        SELECT ts_ms, provider, model, session_id, input_tokens, output_tokens,
+               cache_read_tokens, cost_usd, cost_estimated, status_code
         FROM requests ORDER BY ts_ms DESC LIMIT ?
     """,
         (limit,),
@@ -440,8 +602,7 @@ def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
 
     out = [
         _title("tokview", width),
-        f"db: {_clip(db_path, width - 4)}",
-        f"now: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}    live: tokview show --watch",
+        _meta_line(db_path, width),
         "",
         _cards(
             [
@@ -534,23 +695,24 @@ def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
                 out.append("  tools: none recorded yet")
             recent = _session_recent_calls(con, sid, 3)
             headers = (
-                ["time", "model", "in->out", "cost", "tools"]
+                ["time", "model", "in/out", "cache", "cost", "tools"]
                 if compact
-                else ["time", "model", "in->out", "cost", "st", "tools"]
+                else ["time", "model", "in/out", "cache", "cost", "st", "tools"]
             )
             rows = [
                 [
                     _time(c["ts_ms"]),
                     _clip(c["model"] or "-", 18 if compact else 24),
-                    f"{_num(c['input_tokens'])}->{_num(c['output_tokens'])}",
-                    _money(c["cost_usd"]),
+                    f"{_num(c['input_tokens'])}/{_num(c['output_tokens'])}",
+                    _num(c["cache_read_tokens"]),
+                    _money_est(c["cost_usd"], c["cost_estimated"]),
                     _clip(c["tools"] or "-", 20 if compact else 28),
                 ]
                 for c in recent
             ]
             if not compact:
                 rows = [
-                    [*row[:4], str(recent[i]["status_code"] or 200), *row[4:]]
+                    [*row[:5], str(recent[i]["status_code"] or 200), *row[5:]]
                     for i, row in enumerate(rows)
                 ]
             out.append(_indent(_table(headers, rows, width - 2), "  "))
@@ -588,13 +750,14 @@ def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
         if compact:
             out.append(
                 _table(
-                    ["time", "model", "in->out", "cost", "session"],
+                    ["time", "model", "in/out", "cache", "cost", "session"],
                     [
                         [
                             _time(r["ts_ms"]),
                             _clip(r["model"] or "-", 18),
-                            f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}",
-                            _money(r["cost_usd"]),
+                            f"{_num(r['input_tokens'])}/{_num(r['output_tokens'])}",
+                            _num(r["cache_read_tokens"]),
+                            _money_est(r["cost_usd"], r["cost_estimated"]),
                             _clip(r["session_id"] or "-", 16),
                         ]
                         for r in calls
@@ -605,14 +768,15 @@ def _render_overview(con: sqlite3.Connection, db_path: Path, limit: int) -> str:
         else:
             out.append(
                 _table(
-                    ["time", "provider", "model", "in->out", "cost", "st", "session"],
+                    ["time", "provider", "model", "in/out", "cache", "cost", "st", "session"],
                     [
                         [
                             _time(r["ts_ms"]),
                             r["provider"] or "-",
                             _clip(r["model"] or "-", 28),
-                            f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}",
-                            _money(r["cost_usd"]),
+                            f"{_num(r['input_tokens'])}/{_num(r['output_tokens'])}",
+                            _num(r["cache_read_tokens"]),
+                            _money_est(r["cost_usd"], r["cost_estimated"]),
                             str(r["status_code"] or 200),
                             _clip(r["session_id"] or "-", 18),
                         ]
@@ -634,7 +798,7 @@ def _render_session(con: sqlite3.Connection, session_id: str, limit: int) -> str
         "SELECT * FROM requests WHERE session_id = ? ORDER BY ts_ms ASC LIMIT ?",
         (session_id, max(limit, 500)),
     )
-    out = [_title("tokview session", width), f"session: {session_id}", ""]
+    out = [_title("tokview session", width), f"session: {_clip(session_id, width - 9)}", ""]
     if not calls:
         out.append("no calls in this session")
         return "\n".join(out)
@@ -690,8 +854,9 @@ def _render_session(con: sqlite3.Connection, session_id: str, limit: int) -> str
         con,
         """
         SELECT
-            r.ts_ms, r.model, r.input_tokens, r.output_tokens, r.latency_ms, r.ttft_ms,
-            r.cost_usd, r.status_code, COALESCE(t.tools, '') tools
+            r.ts_ms, r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens,
+            r.latency_ms, r.ttft_ms, r.cost_usd, r.cost_estimated, r.status_code,
+            COALESCE(t.tools, '') tools
         FROM requests r
         LEFT JOIN (
             SELECT request_id, GROUP_CONCAT(tool_name || ':' || total_tokens, ', ') tools
@@ -707,13 +872,14 @@ def _render_session(con: sqlite3.Connection, session_id: str, limit: int) -> str
     if compact:
         out.append(
             _table(
-                ["time", "model", "in->out", "cost", "tools"],
+                ["time", "model", "in/out", "cache", "cost", "tools"],
                 [
                     [
                         _time(r["ts_ms"]),
                         _clip(r["model"] or "-", 18),
-                        f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}",
-                        _money(r["cost_usd"]),
+                        f"{_num(r['input_tokens'])}/{_num(r['output_tokens'])}",
+                        _num(r["cache_read_tokens"]),
+                        _money_est(r["cost_usd"], r["cost_estimated"]),
                         _clip(r["tools"] or "-", 18),
                     ]
                     for r in timeline
@@ -724,15 +890,16 @@ def _render_session(con: sqlite3.Connection, session_id: str, limit: int) -> str
     else:
         out.append(
             _table(
-                ["time", "model", "in->out", "latency", "ttft", "cost", "st", "tools"],
+                ["time", "model", "in/out", "cache", "latency", "ttft", "cost", "st", "tools"],
                 [
                     [
                         _time(r["ts_ms"]),
                         _clip(r["model"] or "-", 24),
-                        f"{_num(r['input_tokens'])}->{_num(r['output_tokens'])}",
+                        f"{_num(r['input_tokens'])}/{_num(r['output_tokens'])}",
+                        _num(r["cache_read_tokens"]),
                         _duration(r["latency_ms"]),
                         _duration(r["ttft_ms"]),
-                        _money(r["cost_usd"]),
+                        _money_est(r["cost_usd"], r["cost_estimated"]),
                         str(r["status_code"] or 200),
                         _clip(r["tools"] or "-", 26),
                     ]
@@ -794,8 +961,8 @@ def _session_recent_calls(
         con,
         """
         SELECT
-            r.ts_ms, r.model, r.input_tokens, r.output_tokens, r.cost_usd, r.status_code,
-            COALESCE(t.tools, '') tools
+            r.ts_ms, r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens,
+            r.cost_usd, r.cost_estimated, r.status_code, COALESCE(t.tools, '') tools
         FROM requests r
         LEFT JOIN (
             SELECT request_id, GROUP_CONCAT(tool_name || ':' || total_tokens, ', ') tools
@@ -821,18 +988,37 @@ def _utc_month_start_ms() -> int:
 
 
 def _title(text: str, width: int) -> str:
-    return f" {text} ".center(width, "=")
+    label = f" {text.upper()} "
+    line = label + "-" * max(0, width - len(label))
+    return _paint(line, "cyan", bold=True)
+
+
+def _meta_line(db_path: Path, width: int) -> str:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    left = f"{now} | watch: tokview show --watch"
+    right = f"db: {db_path}"
+    if len(left) + 3 + len(right) <= width:
+        return left + " | " + right
+    return left + " | db: " + _clip(db_path, max(12, width - len(left) - 7))
 
 
 def _section(text: str) -> str:
-    return text.upper()
+    return _paint(f"-- {text.upper()} ", "blue", bold=True)
 
 
 def _cards(cards: list[tuple[str, str, str]], width: int) -> str:
-    card_w = max(18, min(28, (width - 3 * (len(cards) - 1)) // len(cards)))
-    return "\n".join(
-        "   ".join(part.ljust(card_w) for part in row) for row in zip(*cards, strict=True)
+    if not cards:
+        return ""
+    card_w = max(16, min(30, (width - 3 * (len(cards) - 1)) // len(cards)))
+    top = "  ".join(
+        _paint(label.upper().ljust(card_w), "bright_black", bold=True) for label, _, _ in cards
     )
+    mid = "  ".join(
+        _paint(value.ljust(card_w), _card_value_color(label), bold=True)
+        for label, value, _ in cards
+    )
+    bot = "  ".join(detail.ljust(card_w) for _, _, detail in cards)
+    return "\n".join([top, mid, bot])
 
 
 def _rank_table(rows: list[sqlite3.Row], label_col: str, width: int) -> str:
@@ -862,21 +1048,84 @@ def _table(headers: list[str], rows: list[list[str]], width: int) -> str:
     for row in rows:
         for i, cell in enumerate(row):
             col_widths[i] = max(col_widths[i], len(str(cell)))
-    total = sum(col_widths) + 2 * (len(headers) - 1)
-    if total > width:
-        col_widths[0] = max(12, col_widths[0] - (total - width))
-    fmt = "  ".join("{:<" + str(w) + "}" for w in col_widths)
-    out = [fmt.format(*[_clip(h, col_widths[i]) for i, h in enumerate(headers)])]
-    out.append(fmt.format(*["-" * w for w in col_widths]))
+
+    gap = 2
+    total = sum(col_widths) + gap * (len(headers) - 1)
+    if total < width:
+        expandable = _expandable_columns(headers)
+        if expandable:
+            col_widths[expandable[0]] += min(width - total, 32)
+    else:
+        overflow = total - width
+        for i in _shrinkable_columns(headers, col_widths):
+            if overflow <= 0:
+                break
+            floor = 12 if i == 0 else max(8, len(headers[i]))
+            take = min(overflow, max(0, col_widths[i] - floor))
+            col_widths[i] -= take
+            overflow -= take
+
+    def render_cell(value: object, i: int, *, header: bool = False) -> str:
+        text = _clip(value, col_widths[i])
+        if _right_aligned(headers[i]) and not header:
+            return text.rjust(col_widths[i])
+        if _right_aligned(headers[i]) and header:
+            return text.rjust(col_widths[i])
+        return text.ljust(col_widths[i])
+
+    header_line = (" " * gap).join(
+        render_cell(h.upper(), i, header=True) for i, h in enumerate(headers)
+    )
+    sep = (" " * gap).join("-" * w for w in col_widths)
+    out = [_paint(header_line, "bright_black", bold=True), _paint(sep, "bright_black")]
     for row in rows:
-        out.append(fmt.format(*[_clip(str(row[i]), col_widths[i]) for i in range(len(headers))]))
+        out.append((" " * gap).join(render_cell(row[i], i) for i in range(len(headers))))
     return "\n".join(out)
+
+
+def _right_aligned(header: str) -> bool:
+    key = header.lower().replace(" ", "_")
+    return key in {
+        "calls",
+        "args",
+        "results",
+        "total",
+        "tokens",
+        "tool_tok",
+        "errors",
+        "cost",
+        "st",
+        "status",
+        "cache",
+        "latency",
+        "ttft",
+        "in/out",
+        "in->out",
+        "last",
+    }
+
+
+def _expandable_columns(headers: list[str]) -> list[int]:
+    priority = ("tools", "models", "session", "tool", "provider", "model")
+    normalized = [h.lower().replace(" ", "_") for h in headers]
+    for wanted in priority:
+        matches = [
+            i for i, h in enumerate(normalized) if h == wanted and not _right_aligned(headers[i])
+        ]
+        if matches:
+            return matches
+    return [i for i, h in enumerate(headers) if not _right_aligned(h)] or [0]
+
+
+def _shrinkable_columns(headers: list[str], widths: list[int]) -> list[int]:
+    text_cols = [i for i, h in enumerate(headers) if not _right_aligned(h)]
+    return sorted(text_cols or range(len(headers)), key=lambda i: widths[i], reverse=True)
 
 
 def _bar(value: float, max_value: float, width: int) -> str:
     filled = 0 if max_value <= 0 else round((value / max_value) * width)
     filled = max(0, min(width, filled))
-    return "#" * filled + "." * (width - filled)
+    return "#" * filled + "-" * (width - filled)
 
 
 def _clip(value: object, width: int) -> str:
@@ -888,11 +1137,51 @@ def _indent(text: str, prefix: str) -> str:
     return "\n".join(prefix + line if line else line for line in text.splitlines())
 
 
+def _card_value_color(label: str) -> str:
+    low = label.lower()
+    if "error" in low:
+        return "red"
+    if "spend" in low or "cost" in low:
+        return "green"
+    return "yellow"
+
+
+def _colors_enabled() -> bool:
+    return bool(
+        sys.stdout.isatty()
+        and not os.environ.get("NO_COLOR")
+        and os.environ.get("TERM", "") != "dumb"
+    )
+
+
+def _paint(text: str, color: str, *, bold: bool = False) -> str:
+    if not _colors_enabled():
+        return text
+    codes = {
+        "red": "31",
+        "green": "32",
+        "yellow": "33",
+        "blue": "34",
+        "cyan": "36",
+        "bright_black": "90",
+    }
+    code = codes.get(color)
+    if code is None:
+        return text
+    prefix = f"\033[{code}{';1' if bold else ''}m"
+    return f"{prefix}{text}\033[0m"
+
+
 def _money(value: object) -> str:
     n = float(value or 0)
     if 0 < abs(n) < 0.0001:
         return f"${n:.6f}"
     return f"${n:.4f}"
+
+
+def _money_est(value: object, estimated: object) -> str:
+    suffix = "~" if int(estimated or 0) else ""
+    return _money(value) + suffix
 
 
 def _num(value: object) -> str:

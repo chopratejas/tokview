@@ -144,6 +144,57 @@ def test_multiple_tools_in_one_conversation():
     assert by_name["Bash"]["result_tokens"] == 2
 
 
+def test_codex_exec_command_is_grouped_by_rtk_command():
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call_read",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": '{"cmd":"rtk read src/tokview/server.py"}',
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_read",
+            "content": "alpha beta gamma",
+        },
+    ]
+
+    out = parse_completed_tool_calls(messages, "gpt-5.5", wc)
+
+    assert out[0]["name"] == "rtk read"
+    assert out[0]["result_tokens"] == 3
+
+
+def test_codex_exec_command_without_rtk_uses_binary_name():
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call_pytest",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": '{"cmd":"pytest -q"}',
+                    },
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_pytest", "content": "ok"},
+    ]
+
+    out = parse_completed_tool_calls(messages, "gpt-5.5", wc)
+
+    assert out[0]["name"] == "pytest"
+
+
 def test_empty_and_none():
     assert parse_completed_tool_calls(None, "gpt-4o", wc) == []
     assert parse_completed_tool_calls([], "gpt-4o", wc) == []

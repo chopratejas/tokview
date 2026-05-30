@@ -5,7 +5,14 @@ from __future__ import annotations
 import asyncio
 import time
 
-from tokview.cli import _render_cli_dashboard
+from click.testing import CliRunner
+
+from tokview.cli import (
+    _inject_codex_provider_config,
+    _render_cli_dashboard,
+    _restore_codex_provider_config,
+    main,
+)
 from tokview.db import Database
 
 
@@ -132,3 +139,76 @@ def test_show_latest_selects_most_recent_session(tmp_path):
     out = _render_cli_dashboard(db_path, session_id="latest", limit=5)
 
     assert "session: new-session" in out
+
+
+def test_wrap_codex_forwards_all_args_after_codex(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr("tokview.cli._ensure_tokview_started", lambda: None)
+    monkeypatch.setattr("tokview.cli._inject_codex_provider_config", lambda _port: None)
+    monkeypatch.setattr(
+        "shutil.which", lambda name: "/usr/local/bin/codex" if name == "codex" else None
+    )
+
+    def fake_call(argv, env):
+        captured["argv"] = argv
+        captured["env"] = env
+        return 0
+
+    monkeypatch.setattr("subprocess.call", fake_call)
+
+    result = CliRunner().invoke(
+        main,
+        ["wrap", "codex", "--model", "gpt-5.5", "--search", "literal"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["argv"] == [
+        "/usr/local/bin/codex",
+        "--model",
+        "gpt-5.5",
+        "--search",
+        "literal",
+    ]
+    assert captured["env"]["OPENAI_BASE_URL"] == "http://127.0.0.1:4000/v1"
+
+
+def test_codex_wrap_config_is_reversible(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    config_dir = tmp_path / ".codex"
+    config_dir.mkdir()
+    config_file = config_dir / "config.toml"
+    original = '[profiles.default]\nmodel = "gpt-5.5"\n'
+    config_file.write_text(original)
+
+    _inject_codex_provider_config(4000)
+    wrapped = config_file.read_text()
+
+    assert 'openai_base_url = "http://127.0.0.1:4000/v1"' in wrapped
+    assert "supports_websockets = true" in wrapped
+    assert "[model_providers.tokview]" in wrapped
+    assert "[profiles.default]" in wrapped
+
+    status, restored_path = _restore_codex_provider_config()
+
+    assert status == "restored"
+    assert restored_path == config_file
+    assert config_file.read_text() == original
+
+
+def test_codex_wrap_config_is_idempotent(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    _inject_codex_provider_config(4000)
+    _inject_codex_provider_config(4001)
+    config_file = tmp_path / ".codex" / "config.toml"
+    wrapped = config_file.read_text()
+
+    assert wrapped.count("tokview proxy") == 2
+    assert "http://127.0.0.1:4001/v1" in wrapped
+    assert "http://127.0.0.1:4000/v1" not in wrapped
+
+    status, _ = _restore_codex_provider_config()
+
+    assert status == "removed"
+    assert not config_file.exists()

@@ -21,6 +21,7 @@ testable; the proxy passes a LiteLLM-backed counter.
 from __future__ import annotations
 
 import json
+import shlex
 from collections.abc import Callable
 from typing import Any
 
@@ -88,9 +89,10 @@ def parse_completed_tool_calls(
             tid = tc.get("id")
             fn = tc.get("function") or {}
             if tid:
+                arg_text = _as_text(fn.get("arguments"))
                 uses[tid] = {
-                    "name": fn.get("name") or "unknown",
-                    "arg_text": _as_text(fn.get("arguments")),
+                    "name": _display_tool_name(fn.get("name") or "unknown", arg_text),
+                    "arg_text": arg_text,
                 }
         # tool result message
         if role == "tool" and msg.get("tool_call_id"):
@@ -103,9 +105,10 @@ def parse_completed_tool_calls(
                     continue
                 btype = block.get("type")
                 if btype == "tool_use" and block.get("id"):
+                    arg_text = _as_text(block.get("input"))
                     uses[block["id"]] = {
-                        "name": block.get("name") or "unknown",
-                        "arg_text": _as_text(block.get("input")),
+                        "name": _display_tool_name(block.get("name") or "unknown", arg_text),
+                        "arg_text": arg_text,
                     }
                 elif btype == "tool_result" and block.get("tool_use_id"):
                     results[block["tool_use_id"]] = _as_text(block.get("content"))
@@ -125,6 +128,38 @@ def parse_completed_tool_calls(
             }
         )
     return out
+
+
+def _display_tool_name(name: str, arg_text: str) -> str:
+    if name not in {"exec_command", "shell"}:
+        return name
+    command = _extract_shell_command(arg_text)
+    if not command:
+        return name
+    parts = _shell_parts(command)
+    if not parts:
+        return name
+    if parts[0] == "rtk" and len(parts) > 1:
+        return f"rtk {parts[1]}"
+    return parts[0]
+
+
+def _extract_shell_command(arg_text: str) -> str | None:
+    try:
+        parsed = json.loads(arg_text)
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    value = parsed.get("cmd") or parsed.get("command")
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _shell_parts(command: str) -> list[str]:
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return command.split()
 
 
 def _safe_count(count_tokens: CountTokens, model: str, text: str) -> int:
