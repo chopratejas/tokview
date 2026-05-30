@@ -11,6 +11,16 @@
 
 It is built for workflows normal token counters miss: Codex and Claude Code subscription sessions, OAuth traffic, WebSockets, streaming responses, provider-compatible SDKs, and tool outputs that get resent into later turns.
 
+## See It
+
+The terminal TUI is the main experience. It gives you live spend, sessions, request tails, provider/model mix, cache reads, and tool hotspots without opening a browser.
+
+<img src="docs/images/tokview-tui.png" alt="tokview terminal TUI showing tool hotspots, provider/model mix, cache reads, and live request tail" width="100%">
+
+The browser dashboard is optional, but useful when you want a wider visual scan of spend, cache usage, sessions, and recent calls.
+
+<img src="docs/images/tokview-dashboard.png" alt="tokview browser dashboard showing spend cards, cache reads, provider and model mix, session trace, and live tail" width="100%">
+
 ## Run It
 
 Install the package. The PyPI name is `token-viewer`; the command is `tokview`.
@@ -43,16 +53,6 @@ tokview wrap claude --model opus
 ```
 
 `wrap` starts one shared local proxy if needed. Multiple Codex and Claude sessions can run at once and appear as separate sessions in `tokview show`.
-
-## Screenshots
-
-### Terminal TUI
-
-<img src="docs/images/tokview-tui.png" alt="tokview terminal TUI showing tool hotspots, provider/model mix, cache reads, and live request tail" width="100%">
-
-### Optional Browser Dashboard
-
-<img src="docs/images/tokview-dashboard.png" alt="tokview browser dashboard showing spend cards, cache reads, provider and model mix, session trace, and live tail" width="100%">
 
 ## What You Get
 
