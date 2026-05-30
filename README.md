@@ -1,28 +1,19 @@
 # tokview
 
-> Local token spend observability for Codex, Claude Code, and provider-compatible SDKs.
+> Live token spend for Codex, Claude Code, and LLM SDK traffic. Local, terminal-first, no hosted service.
 
 [![CI](https://github.com/chopratejas/tokview/actions/workflows/ci.yml/badge.svg)](https://github.com/chopratejas/tokview/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/token-viewer.svg)](https://pypi.org/project/token-viewer/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11--3.13-blue.svg)](https://www.python.org/downloads/)
 
-tokview is a local proxy plus a live terminal dashboard. It shows spend by session, request, model, cache reads, and tool call, without instrumenting your app or sending data to a hosted service.
+`tokview` shows where your agent tokens go while the agent is running: sessions, requests, models, cache reads, estimated spend, and tool-result hotspots.
 
-Most token counters answer one of these questions: what did my provider bill this month, what did my SDK app emit, or what did Claude Code log after the fact? tokview is built for the harder agent workflow: live Codex and Claude Code sessions, including subscription/OAuth traffic, WebSockets, streaming responses, cache reads, and tool outputs that quietly become tomorrow's input tokens.
+It is built for workflows normal token counters miss: Codex and Claude Code subscription sessions, OAuth traffic, WebSockets, streaming responses, provider-compatible SDKs, and tool outputs that get resent into later turns.
 
-```bash
-tokview wrap codex      # launch Codex through tokview
-tokview wrap claude     # launch Claude Code through tokview
-tokview show --watch    # live terminal dashboard
-tokview unwrap codex    # remove Codex routing config
-```
+## Run It
 
-`wrap` starts the shared local proxy if needed and reuses it if it is already running. Multiple Codex and Claude sessions can run at the same time; they share one proxy and appear as separate sessions in `tokview show`.
-
-## Quick Start
-
-Install the command. The PyPI package is `token-viewer`; the executable is `tokview`.
+Install the package. The PyPI name is `token-viewer`; the command is `tokview`.
 
 ```bash
 uv tool install token-viewer
@@ -30,13 +21,13 @@ uv tool install token-viewer
 pipx install token-viewer
 ```
 
-Start the dashboard in one terminal:
+Open the live terminal dashboard:
 
 ```bash
 tokview show --watch
 ```
 
-Run your agent in another terminal:
+Run your agent through tokview in another terminal:
 
 ```bash
 tokview wrap codex
@@ -44,142 +35,75 @@ tokview wrap codex
 tokview wrap claude
 ```
 
-Pass agent flags normally; tokview forwards them unchanged:
+Pass agent flags normally:
 
 ```bash
 tokview wrap codex --model gpt-5.5 --search
 tokview wrap claude --model opus
 ```
 
-When you are done with durable Codex routing:
-
-```bash
-tokview unwrap codex
-```
-
-Claude wrapping is environment-based, so there is no persistent Claude config to undo today.
+`wrap` starts one shared local proxy if needed. Multiple Codex and Claude sessions can run at once and appear as separate sessions in `tokview show`.
 
 ## Screenshots
 
 ### Terminal TUI
 
-The terminal dashboard is the primary tokview experience: sessions, tool hotspots, cache reads, estimated spend, and live request tail in one place.
-
 <img src="docs/images/tokview-tui.png" alt="tokview terminal TUI showing tool hotspots, provider/model mix, cache reads, and live request tail" width="100%">
 
-### Browser Dashboard
-
-The browser dashboard is optional, but useful when you want a wider visual summary of spend, cache usage, provider mix, sessions, and recent calls.
+### Optional Browser Dashboard
 
 <img src="docs/images/tokview-dashboard.png" alt="tokview browser dashboard showing spend cards, cache reads, provider and model mix, session trace, and live tail" width="100%">
 
+## What You Get
+
+- Live spend by session, request, provider, and model.
+- Input, output, cache-read, cache-write, and reasoning token counters when reported.
+- Estimated equivalent API spend for subscription traffic.
+- Tool argument/result token estimates, including Codex shell command families such as `read`, `grep`, `find`, `pytest`, and `npm`.
+- A local SQLite history at `~/.tokview/db.sqlite`.
+
+Tool-level values are token estimates, not dollars. Providers bill per model call, and cache discounts make per-tool dollars misleading.
+
 ## Works With
 
-| Client | Command | Notes |
+| Client | Use | Notes |
 | --- | --- | --- |
-| Codex subscription | `tokview wrap codex` | Routes HTTP and WebSocket Responses traffic through tokview, including ChatGPT-auth Codex backend traffic. |
-| Claude Code subscription / OAuth | `tokview wrap claude` | Launches Claude Code through tokview with native Anthropic forwarding for subscription/OAuth and API-key traffic. |
-| OpenAI-compatible SDKs | `OPENAI_BASE_URL=http://127.0.0.1:4000/v1` | API-key traffic is handled through LiteLLM. |
-| Anthropic-compatible SDKs | `ANTHROPIC_BASE_URL=http://127.0.0.1:4000` | API-key and OAuth-style traffic are normalized into the same views. |
+| Codex subscription | `tokview wrap codex` | Handles HTTP and WebSocket Responses traffic, including ChatGPT-auth Codex backend calls. |
+| Claude Code subscription / OAuth | `tokview wrap claude` | Handles native Anthropic Messages forwarding for subscription/OAuth and API-key traffic. |
+| OpenAI-compatible SDKs | `OPENAI_BASE_URL=http://127.0.0.1:4000/v1` | API-key traffic through LiteLLM. |
+| Anthropic-compatible SDKs | `ANTHROPIC_BASE_URL=http://127.0.0.1:4000` | Native Anthropic-compatible proxying. |
 | Gemini-compatible SDKs | `GOOGLE_BASE_URL=http://127.0.0.1:4000` | Direct proxy mode. |
 
-No app instrumentation is required. If the client can be pointed at a provider-compatible base URL, tokview can usually observe it.
+No app instrumentation is required. If a client can use a provider-compatible base URL, tokview can usually observe it.
 
-## Why It Exists
+## Compared To Other Counters
 
-Agent sessions often spend most of their tokens on tool results that get sent back into the model repeatedly. A provider bill can tell you a request used 70k input tokens; tokview helps answer what caused that spend.
-
-tokview shows:
-
-- sessions, requests, providers, and models
-- input/output tokens and cache-read tokens
-- estimated equivalent API spend for subscription traffic
-- tool argument/result token estimates
-- command-level hotspots for Codex shell tools, such as `rtk read`, `rtk find`, `pytest`, and `npm`
-
-Tool-level dollars are intentionally not reported. Providers bill per model call, and cache discounts make per-tool cost misleading. tokview reports per-tool token volume instead.
-
-## How tokview is different
-
-| Approach | Good at | Where it falls short for agent work |
+| Approach | Good for | tokview adds |
 | --- | --- | --- |
-| Provider dashboards | Billing totals and organization-level usage | Not local, not session-first, and usually not tool-result attribution. |
-| SDK observability platforms | Traces for apps you instrument | Requires code/SDK/proxy integration and usually targets API-key app traffic. |
-| Log readers for Claude/Codex | Post-hoc local usage summaries | Not a live proxy, and cannot observe arbitrary SDK traffic. |
-| Generic tokenizers | Estimating prompt size before a call | No provider-truth usage, cache reads, streaming, tool results, or cost. |
-| tokview | Live local proxying for wrapped CLIs and SDKs | Single-user localhost tool today; team/multi-user mode is future work. |
+| Provider dashboards | Billing totals | Local session/request/tool views. |
+| SDK observability | Instrumented apps | CLI wrapping and localhost-only capture. |
+| Claude/Codex log readers | Post-hoc summaries | Live proxy traffic and SDK coverage. |
+| Tokenizers | Prompt-size estimates | Provider usage, cache counters, streaming data, and cost. |
 
-The important distinction: tokview sees traffic as it happens. For Codex and Claude Code, `wrap` handles the client-specific routing so subscription/OAuth traffic and streaming transports still land in the same local SQLite database and TUI.
-
-## Wrapping CLIs
-
-### Codex
-
-```bash
-tokview wrap codex
-```
-
-Codex subscription mode does not reliably honor a plain `OPENAI_BASE_URL` environment variable, especially for WebSocket traffic. `tokview wrap codex` writes a small reversible block to `~/.codex/config.toml` so both HTTP and WebSocket Responses traffic route through tokview.
-
-Undo it with:
-
-```bash
-tokview unwrap codex
-```
-
-`unwrap` restores the exact pre-wrap config when a backup exists, or removes only the tokview-managed block.
-
-### Claude Code
-
-```bash
-tokview wrap claude
-```
-
-Claude wrapping launches Claude Code with `ANTHROPIC_BASE_URL` pointed at the local tokview proxy. Subscription/OAuth and API-key traffic are forwarded natively and normalized into the same SQLite/TUI views.
-
-## Direct Proxy Mode
-
-For SDKs or tools without a dedicated wrapper, point the client at the local proxy yourself. The proxy is normally started by the first `tokview wrap ...`.
-
-```bash
-export OPENAI_BASE_URL=http://127.0.0.1:4000/v1
-export ANTHROPIC_BASE_URL=http://127.0.0.1:4000
-export GOOGLE_BASE_URL=http://127.0.0.1:4000
-```
-
-Then watch:
-
-```bash
-tokview show --watch
-```
-
-The optional browser dashboard is available at <http://127.0.0.1:3000>. The terminal dashboard gives the core workflow without a browser or frontend build.
-
-## CLI
-
-Primary commands:
+## Commands
 
 ```bash
 tokview wrap codex [CODEX_ARGS...]
 tokview wrap claude [CLAUDE_ARGS...]
 tokview unwrap codex
+
 tokview show --watch
 tokview show --latest
 tokview show --session SESSION_ID
-```
 
-Utilities:
-
-```bash
 tokview status
 tokview logs [-f] [-n N]
 tokview export --since YYYY-MM-DD --format csv|json
 tokview reset
-tokview config-path
 tokview version
 ```
 
-`tokview start` and `tokview stop` are intentionally hidden from help. They are implementation details for wrappers and debugging, not the normal UX.
+`tokview start` and `tokview stop` exist for debugging, but the normal workflow is `tokview wrap ...` plus `tokview show`.
 
 ## How It Works
 
@@ -191,70 +115,47 @@ Codex / Claude / SDKs -> tokview local proxy -> provider backend
                                 +-> optional browser dashboard
 ```
 
-For normal API-key traffic, LiteLLM handles provider routing and tokview records LiteLLM's standard logging payload.
+- API-key traffic uses LiteLLM where that is the right routing layer.
+- Codex subscription traffic uses tokview's native Codex adapter so HTTP and WebSocket Responses traffic are observable.
+- Claude Code subscription/OAuth traffic uses tokview's native Anthropic adapter.
+- Costs marked with `~` are estimated equivalent API spend because subscription products do not bill per request like API-key calls.
 
-For subscription CLIs, tokview uses native transport adapters:
+## Data And Privacy
 
-- Codex ChatGPT subscription traffic routes to the ChatGPT Codex Responses backend and supports HTTP and WebSocket flows.
-- Claude Code subscription/OAuth traffic routes through Anthropic's native Messages API.
+By default tokview stores accounting metadata only:
 
-After the response comes back, tokview normalizes usage, cache reads, reasoning tokens, estimated cost, sessions, requests, and tool rows into one local SQLite schema. Costs marked with `~` are estimates from provider usage and LiteLLM pricing; subscription products do not bill per request the same way API-key calls do.
-
-## Data Captured
-
-By default tokview stores metadata and accounting fields only:
-
-- timestamps and latency
-- provider and model
-- session id
-- input/output tokens
-- cache-read/cache-write token counters
-- reasoning tokens when reported
+- timestamp, latency, status
+- provider, model, session id
+- input/output/cache/reasoning token counters
 - cost or estimated equivalent API cost
-- tool names and estimated argument/result tokens
-- status codes and error messages
+- tool names with estimated argument/result tokens
 
-No prompt text or response text is stored by default.
+No prompt text or response text is stored by default. Provider API keys come from the environment; tokview forwards them and does not persist them.
 
 ## Configuration
 
-`~/.tokview/config.yaml` is created automatically. Defaults are localhost-only.
+`~/.tokview/config.yaml` is created automatically and defaults to localhost-only:
 
 ```yaml
-proxy:        { port: 4000, bind: 127.0.0.1 }
-dashboard:    { port: 3000, bind: 127.0.0.1 }
-storage:      { path: ~/.tokview/db.sqlite }
-retention:    { days: 90 }
-capture:      { prompts: false, responses: false }
+proxy:      { port: 4000, bind: 127.0.0.1 }
+dashboard:  { port: 3000, bind: 127.0.0.1 }
+storage:    { path: ~/.tokview/db.sqlite }
+retention:  { days: 90 }
+capture:    { prompts: false, responses: false }
 ```
 
-Provider API keys come from the environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, etc.). tokview forwards them; it does not persist them.
+## Security
 
-## Privacy
-
-Default: token counts, cost, timing, provider/model/session metadata, and tool token estimates. No prompt text. No response text.
-
-If full request/response capture is enabled later in config, redact patterns run before persistence.
-
-## Security Stance
-
-- Default bind is `127.0.0.1`.
-- SQLite lives at `~/.tokview/db.sqlite`.
-- Runtime fetching of model pricing is disabled; prices come from the pinned LiteLLM wheel.
-- No account, no cloud service, no telemetry requirement.
+- Binds to `127.0.0.1` by default.
+- Stores data locally in `~/.tokview/db.sqlite`.
+- Uses LiteLLM's installed pricing map instead of runtime pricing fetches.
+- Requires no account, cloud service, or telemetry.
 
 See [SECURITY.md](SECURITY.md).
 
-## Current Limits
-
-- tokview is local and single-user today.
-- Subscription costs are shown as estimated equivalent API spend because subscription plans do not bill per request like API-key calls.
-- Tool-level attribution is token volume, not dollars.
-- Browser dashboard is optional; the terminal TUI is the main workflow.
-
 ## Status
 
-`v0.0.x` alpha. Single-user laptop tool. Works best today for Codex, Claude Code, OpenAI-compatible SDKs, Anthropic-compatible SDKs, Gemini-compatible SDKs, and LiteLLM-supported providers routed through the proxy.
+`v0.0.x` alpha. Best today for Codex, Claude Code, OpenAI-compatible SDKs, Anthropic-compatible SDKs, Gemini-compatible SDKs, and LiteLLM-supported providers routed through the proxy.
 
 ## Contributing
 
@@ -270,6 +171,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-[MIT](LICENSE). © 2026 Tejas Chopra.
-
-Bundled open-source dependencies are credited in [NOTICES.md](NOTICES.md).
+[MIT](LICENSE). Bundled open-source dependencies are credited in [NOTICES.md](NOTICES.md).
