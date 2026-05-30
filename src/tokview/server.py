@@ -8,12 +8,15 @@ vice-versa.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
 from pathlib import Path
+from typing import Any
 
 import uvicorn
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .config import DEFAULT_DIR, TokviewConfig
 from .db import Database
@@ -57,9 +60,10 @@ async def serve(tokview: TokviewConfig) -> None:
     litellm.callbacks = [tokview_logger]
 
     dashboard_app = build_app(db=db, pubsub=pubsub)
+    proxy_app = ModelPrefixMiddleware(litellm_app)
 
     proxy_cfg = uvicorn.Config(
-        litellm_app,
+        proxy_app,
         host=tokview.proxy.bind,
         port=tokview.proxy.port,
         log_level="info",
@@ -102,3 +106,97 @@ async def serve(tokview: TokviewConfig) -> None:
 def litellm_config_path() -> Path:
     """Where the generated LiteLLM config lives."""
     return DEFAULT_DIR / "litellm-config.yaml"
+
+
+def normalize_litellm_model(model: Any) -> Any:
+    """Provider-qualify common bare SDK model names for LiteLLM.
+
+    SDKs send provider-native model names like ``claude-opus-4-8`` and
+    ``gpt-4o-mini``. LiteLLM's proxy wildcard groups route reliably when those
+    are provider-qualified as ``anthropic/...`` or ``openai/...``.
+    """
+    if not isinstance(model, str):
+        return model
+    if "/" in model:
+        return model
+    m = model.lower()
+    if m.startswith("claude"):
+        return f"anthropic/{model}"
+    if m.startswith(("gpt-", "o1", "o3", "o4", "o5", "chatgpt-")):
+        return f"openai/{model}"
+    if m.startswith("gemini"):
+        return f"gemini/{model}"
+    return model
+
+
+normalize_anthropic_model = normalize_litellm_model
+
+
+class ModelPrefixMiddleware:
+    """Rewrite bare provider model names in JSON requests before LiteLLM routes."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = {
+            k.decode("latin1").lower(): v.decode("latin1")
+            for k, v in scope.get("headers", [])
+        }
+        content_type = headers.get("content-type", "")
+        if "application/json" not in content_type:
+            await self.app(scope, receive, send)
+            return
+
+        body = b""
+        more_body = True
+        while more_body:
+            message = await receive()
+            body += message.get("body", b"")
+            more_body = bool(message.get("more_body", False))
+
+        rewritten = _rewrite_model_body(body)
+        if rewritten != body:
+            scope = dict(scope)
+            headers_out: list[tuple[bytes, bytes]] = []
+            saw_content_length = False
+            for key, value in scope.get("headers", []):
+                if key.lower() == b"content-length":
+                    headers_out.append((key, str(len(rewritten)).encode("ascii")))
+                    saw_content_length = True
+                else:
+                    headers_out.append((key, value))
+            if not saw_content_length:
+                headers_out.append((b"content-length", str(len(rewritten)).encode("ascii")))
+            scope["headers"] = headers_out
+
+        async def replay() -> Message:
+            return {"type": "http.request", "body": rewritten, "more_body": False}
+
+        await self.app(scope, replay, send)
+
+
+AnthropicModelPrefixMiddleware = ModelPrefixMiddleware
+
+
+def _rewrite_model_body(body: bytes) -> bytes:
+    if not body:
+        return body
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return body
+    if not isinstance(payload, dict) or "model" not in payload:
+        return body
+    normalized = normalize_litellm_model(payload.get("model"))
+    if normalized == payload.get("model"):
+        return body
+    payload["model"] = normalized
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+
+_rewrite_anthropic_model_body = _rewrite_model_body

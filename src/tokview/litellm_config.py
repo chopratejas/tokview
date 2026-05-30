@@ -17,14 +17,34 @@ from .config import TokviewConfig
 def build(tokview: TokviewConfig) -> dict[str, Any]:
     """Return a LiteLLM proxy config as a dict.
 
-    Uses a wildcard model entry so any model the client requests is routed
-    by LiteLLM's built-in provider detection (Anthropic, OpenAI, Gemini, etc.).
+    Uses LiteLLM's provider-specific wildcard model groups. A single
+    ``model_name: "*"`` with ``model: "*"`` is not enough for LiteLLM's
+    Anthropic pass-through endpoint; requests like ``anthropic/claude-*`` are
+    rejected before provider routing. These entries match LiteLLM's documented
+    wildcard format and keep tokview zero-config for the common SDKs.
     """
     return {
         "model_list": [
             {
-                "model_name": "*",
-                "litellm_params": {"model": "*"},
+                "model_name": "openai/*",
+                "litellm_params": {
+                    "model": "openai/*",
+                    "api_key": "os.environ/OPENAI_API_KEY",
+                },
+            },
+            {
+                "model_name": "anthropic/*",
+                "litellm_params": {
+                    "model": "anthropic/*",
+                    "api_key": "os.environ/ANTHROPIC_API_KEY",
+                },
+            },
+            {
+                "model_name": "gemini/*",
+                "litellm_params": {
+                    "model": "gemini/*",
+                    "api_key": "os.environ/GOOGLE_API_KEY",
+                },
             },
         ],
         "litellm_settings": {

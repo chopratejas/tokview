@@ -37,18 +37,30 @@ def _find_web_build() -> Path | None:
 
     Looks in (a) installed package resources (`_web/`), (b) the editable-dev
     sibling `../../../web/build/` from this file's parent. Returns None if
-    neither exists; the caller then falls back to the inline HTML.
+    neither exists; the caller then falls back to the inline HTML. Editable
+    installs can contain hatch_build.py's placeholder index; ignore that so the
+    functional inline dashboard remains available.
     """
+    def usable(path: Path) -> bool:
+        index = path / "index.html"
+        if not index.exists():
+            return False
+        try:
+            text = index.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return True
+        return "The SvelteKit dashboard wasn't included in this install" not in text
+
     try:
         pkg_web = files("tokview") / "_web"
         # files() yields a Traversable; coerce to a real path
         path = Path(str(pkg_web))
-        if (path / "index.html").exists():
+        if usable(path):
             return path
     except (FileNotFoundError, ModuleNotFoundError):
         pass
     dev_path = Path(__file__).resolve().parent.parent.parent / "web" / "build"
-    if (dev_path / "index.html").exists():
+    if usable(dev_path):
         return dev_path
     return None
 
@@ -354,6 +366,8 @@ _INDEX_HTML = """<!doctype html>
     .row .name { color: var(--text); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .row .meta { color: var(--text-dim); margin: 0 10px; font-size: 11px; }
     .row .cost { color: var(--accent-2); }
+    .row-btn { width: 100%; border: 0; background: transparent; color: inherit; padding: 0; text-align: left; cursor: pointer; border-radius: 6px; }
+    .row-btn:hover { background: var(--panel-2); }
     .bar-wrap { background: var(--panel-2); border-radius: 4px; height: 4px; margin-top: 4px; overflow: hidden; }
     .bar { background: var(--accent); height: 100%; }
     table { width: 100%; font-family: var(--mono); font-size: 12px; border-collapse: collapse; }
@@ -361,7 +375,13 @@ _INDEX_HTML = """<!doctype html>
     th { color: var(--text-dim); font-weight: 500; text-transform: uppercase; letter-spacing: 0.6px; font-size: 10px; }
     td.num { text-align: right; }
     td.muted { color: var(--text-dim); }
+    td.link { cursor: pointer; }
+    td.link:hover { color: var(--accent-2); text-decoration: underline; }
     .empty { color: var(--text-dim); padding: 8px 0; font-style: italic; }
+    .session-detail { margin-bottom: 24px; }
+    .session-stats { display: flex; flex-wrap: wrap; gap: 18px; margin-bottom: 12px; font-family: var(--mono); }
+    .session-stats span { color: var(--text-dim); }
+    .session-tools { margin-top: 12px; }
     code { font-family: var(--mono); font-size: 12px; background: var(--panel-2); padding: 2px 6px; border-radius: 4px; }
     .footer { color: var(--text-dim); font-size: 11px; margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border); }
     .footer a { color: var(--accent-2); text-decoration: none; }
@@ -390,6 +410,8 @@ _INDEX_HTML = """<!doctype html>
       <div class="panel"><h3>By model</h3><div id="models"></div></div>
       <div class="panel"><h3>By session</h3><div id="sessions"></div></div>
     </div>
+
+    <div class="panel session-detail" id="session-detail" style="display:none"></div>
 
     <div class="panel">
       <h3>Live tail · last 20</h3>
@@ -494,16 +516,19 @@ _INDEX_HTML = """<!doctype html>
         const pct = total > 0 ? Math.min(100, (r.cost_usd / total) * 100) : 0;
         const sid = (r.session_id || '').slice(0, 12) + '…';
         return `
-          <div>
+          <button class="row-btn" data-session="${escape(r.session_id || '')}">
             <div class="row">
               <span class="name" title="${escape(r.session_id || '')}">${escape(sid)}</span>
               <span class="meta">${fmtNum(r.requests)}</span>
               <span class="cost">${fmtUsdSmall(r.cost_usd)}</span>
             </div>
             <div class="bar-wrap"><div class="bar" style="width:${pct.toFixed(1)}%"></div></div>
-          </div>
+          </button>
         `;
       }).join('');
+      el.querySelectorAll('[data-session]').forEach(btn => {
+        btn.addEventListener('click', () => openSession(btn.dataset.session));
+      });
     }
 
     function renderCalls(rows) {
@@ -516,9 +541,59 @@ _INDEX_HTML = """<!doctype html>
           <td>${escape(r.model || '')}</td>
           <td class="num">${fmtNum(r.input_tokens)} &rarr; ${fmtNum(r.output_tokens)}</td>
           <td class="num">${fmtUsdSmall(r.cost_usd)}</td>
-          <td class="muted">${escape((r.session_id || '').slice(0, 16))}</td>
+          <td class="muted ${r.session_id ? 'link' : ''}" data-session="${escape(r.session_id || '')}">${escape((r.session_id || '').slice(0, 16))}</td>
         </tr>
       `).join('');
+      el.querySelectorAll('[data-session]').forEach(cell => {
+        if (cell.dataset.session) cell.addEventListener('click', () => openSession(cell.dataset.session));
+      });
+    }
+
+    async function openSession(sessionId) {
+      const el = $('session-detail');
+      el.style.display = 'block';
+      el.innerHTML = '<h3>Session trace</h3><div class="empty">loading…</div>';
+      try {
+        const data = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`).then(r => r.json());
+        if (!data.summary) {
+          el.innerHTML = '<h3>Session trace</h3><div class="empty">no calls in this session</div>';
+          return;
+        }
+        const s = data.summary;
+        const tools = data.tools || [];
+        const calls = data.calls || [];
+        el.innerHTML = `
+          <h3>Session trace · <span class="muted">${escape(data.session_id)}</span></h3>
+          <div class="session-stats">
+            <div><span>calls</span> ${fmtNum(s.requests)}</div>
+            <div><span>cost</span> ${fmtUsdSmall(s.cost_usd)}</div>
+            <div><span>tokens</span> ${fmtNum((s.input_tokens || 0) + (s.output_tokens || 0))}</div>
+            <div><span>errors</span> ${fmtNum(s.errors)}</div>
+          </div>
+          ${tools.length ? `
+            <div class="session-tools">
+              <h3>Tools used · token estimates</h3>
+              <table>
+                <thead><tr><th>tool</th><th class="num">calls</th><th class="num">args</th><th class="num">results</th><th class="num">total</th></tr></thead>
+                <tbody>${tools.map(t => `
+                  <tr><td>${escape(t.tool_name)}</td><td class="num">${fmtNum(t.calls)}</td><td class="num muted">${fmtNum(t.arg_tokens)}</td><td class="num">${fmtNum(t.result_tokens)}</td><td class="num">${fmtNum(t.total_tokens)}</td></tr>
+                `).join('')}</tbody>
+              </table>
+            </div>
+          ` : '<div class="empty">no completed tool calls recorded for this session yet</div>'}
+          <div class="session-tools">
+            <h3>Calls</h3>
+            <table>
+              <thead><tr><th>ts</th><th>model</th><th class="num">in&rarr;out</th><th class="num">cost</th><th class="num">status</th></tr></thead>
+              <tbody>${calls.map(c => `
+                <tr><td class="muted">${fmtTs(c.ts_ms)}</td><td>${escape(c.model || '')}</td><td class="num">${fmtNum(c.input_tokens)} &rarr; ${fmtNum(c.output_tokens)}</td><td class="num">${fmtUsdSmall(c.cost_usd)}</td><td class="num">${c.status_code || 200}</td></tr>
+              `).join('')}</tbody>
+            </table>
+          </div>
+        `;
+      } catch (e) {
+        el.innerHTML = '<h3>Session trace</h3><div class="empty">failed to load session</div>';
+      }
     }
 
     function escape(s) {
