@@ -7,6 +7,31 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.6] — 2026-05-30
+
+### Added
+- **Interactive terminal dashboard** for `tokview show --watch` (built on
+  Textual): a clickable sessions list with a live per-session detail pane
+  (per-tool token breakdown + request tail), and a full-screen drill-in with a
+  request latency waterfall and a tool-hotspot callout. Compositor rendering —
+  no flicker; selection is preserved across live refreshes.
+- **Output attribution.** Capture every output sub-field the providers expose —
+  reasoning, output audio, and predicted-output accepted/rejected tokens — and
+  surface a **reasoning-vs-answer** breakdown (+ throughput) in the TUI and a
+  top-level **Output breakdown** panel in the browser dashboard.
+- Browser **Tool hotspots** panel (global), flagging when one tool dominates
+  your tool tokens — the cost of a large result re-sent across turns.
+
+### Changed
+- Dashboard: readable session labels (middle-truncation so the unique suffix
+  shows), a "Tool tokens" stat tile, and `~` markers on estimated equivalent
+  (subscription) spend.
+- README: animated GIF demo of the TUI and a desire-first rewrite.
+
+### Fixed
+- Legacy on-disk databases auto-migrate (new token columns added) the first time
+  they're opened by `tokview show`.
+
 ## [0.0.5] — 2026-05-30
 
 ### Added
@@ -113,7 +138,8 @@ First release. A small, local, single-user token viewer.
 - Default bind `127.0.0.1`. A non-loopback bind requires `--allow-remote` on
   the CLI **and** the corresponding config setting.
 
-[Unreleased]: https://github.com/chopratejas/tokview/compare/v0.0.5...HEAD
+[Unreleased]: https://github.com/chopratejas/tokview/compare/v0.0.6...HEAD
+[0.0.6]: https://github.com/chopratejas/tokview/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/chopratejas/tokview/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/chopratejas/tokview/compare/v0.0.2...v0.0.4
 [0.0.2]: https://github.com/chopratejas/tokview/releases/tag/v0.0.2
