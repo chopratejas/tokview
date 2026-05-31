@@ -205,6 +205,7 @@ def build_app(db: Database, pubsub: PubSub | None = None) -> FastAPI:
             "cost_usd": round(sum(float(c["cost_usd"] or 0) for c in calls), 6),
             "input_tokens": sum(int(c["input_tokens"] or 0) for c in calls),
             "output_tokens": sum(int(c["output_tokens"] or 0) for c in calls),
+            "reasoning_tokens": sum(int(c["reasoning_tokens"] or 0) for c in calls),
             "errors": sum(1 for c in calls if (c["status_code"] or 200) >= 400),
             "first_ts_ms": min(starts),
             "last_ts_ms": max(ends),

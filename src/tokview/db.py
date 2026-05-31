@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS requests (
     reasoning_tokens         INTEGER NOT NULL DEFAULT 0,
     image_tokens             INTEGER NOT NULL DEFAULT 0,
     audio_tokens             INTEGER NOT NULL DEFAULT 0,
+    output_audio_tokens         INTEGER,
+    accepted_prediction_tokens  INTEGER,
+    rejected_prediction_tokens  INTEGER,
     cost_usd                 REAL NOT NULL,
     cost_estimated           INTEGER NOT NULL DEFAULT 0,
     is_stream                INTEGER NOT NULL,
@@ -127,6 +130,9 @@ REQUEST_COLS: tuple[str, ...] = (
     "reasoning_tokens",
     "image_tokens",
     "audio_tokens",
+    "output_audio_tokens",
+    "accepted_prediction_tokens",
+    "rejected_prediction_tokens",
     "cost_usd",
     "cost_estimated",
     "is_stream",
@@ -147,6 +153,9 @@ REQUEST_COLS: tuple[str, ...] = (
 _MIGRATION_COLUMNS: tuple[tuple[str, str], ...] = (
     ("start_ms", "INTEGER"),
     ("ttft_ms", "INTEGER"),
+    ("output_audio_tokens", "INTEGER"),
+    ("accepted_prediction_tokens", "INTEGER"),
+    ("rejected_prediction_tokens", "INTEGER"),
 )
 
 
@@ -229,7 +238,10 @@ class Database:
             COALESCE(SUM(output_tokens), 0)           AS output_tokens,
             COALESCE(SUM(cache_creation_tokens), 0)   AS cache_creation_tokens,
             COALESCE(SUM(cache_read_tokens), 0)       AS cache_read_tokens,
-            COALESCE(SUM(reasoning_tokens), 0)        AS reasoning_tokens
+            COALESCE(SUM(reasoning_tokens), 0)        AS reasoning_tokens,
+            COALESCE(SUM(output_audio_tokens), 0)         AS output_audio_tokens,
+            COALESCE(SUM(accepted_prediction_tokens), 0)  AS accepted_prediction_tokens,
+            COALESCE(SUM(rejected_prediction_tokens), 0)  AS rejected_prediction_tokens
         FROM requests
         WHERE ts_ms BETWEEN ? AND ?
           AND status_code < 400

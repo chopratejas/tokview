@@ -216,11 +216,16 @@ class TokviewLogger(CustomLogger):
         anthropic_cache_create = int(usage.get("cache_creation_input_tokens") or 0)
         anthropic_cache_read = int(usage.get("cache_read_input_tokens") or 0)
 
-        # Reasoning / multimodal tokens
+        # Reasoning / multimodal tokens. image/audio here are INPUT-side
+        # (prompt_tokens_details); output-side audio + predicted-output tokens
+        # come from completion_tokens_details.
         completion_details = usage.get("completion_tokens_details") or {}
         reasoning_tokens = int(completion_details.get("reasoning_tokens") or 0)
         image_tokens = int(prompt_details.get("image_tokens") or 0)
         audio_tokens = int(prompt_details.get("audio_tokens") or 0)
+        output_audio_tokens = int(completion_details.get("audio_tokens") or 0)
+        accepted_prediction_tokens = int(completion_details.get("accepted_prediction_tokens") or 0)
+        rejected_prediction_tokens = int(completion_details.get("rejected_prediction_tokens") or 0)
 
         # Metadata: session, user, tags, user-agent
         session_id = (
@@ -308,6 +313,9 @@ class TokviewLogger(CustomLogger):
             "reasoning_tokens": reasoning_tokens,
             "image_tokens": image_tokens,
             "audio_tokens": audio_tokens,
+            "output_audio_tokens": output_audio_tokens,
+            "accepted_prediction_tokens": accepted_prediction_tokens,
+            "rejected_prediction_tokens": rejected_prediction_tokens,
             "cost_usd": cost_usd,
             "cost_estimated": cost_estimated,
             "is_stream": int(is_stream),

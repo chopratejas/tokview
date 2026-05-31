@@ -19,7 +19,10 @@ def client(tmp_path):
     asyncio.get_event_loop().run_until_complete(db.open())
     # Seed a few rows
     asyncio.get_event_loop().run_until_complete(
-        db.insert_request(_row(request_id="r-success", provider="anthropic", cost_usd=0.05))
+        db.insert_request(
+            _row(request_id="r-success", provider="anthropic", cost_usd=0.05,
+                 output_tokens=400, reasoning_tokens=120)
+        )
     )
     asyncio.get_event_loop().run_until_complete(
         db.insert_request(
@@ -146,6 +149,18 @@ def test_latency_endpoint(client):
     body = r.json()
     assert "models" in body
     assert isinstance(body["models"], list)
+
+
+def test_output_reasoning_surfaced(client):
+    # /api/summary aggregate carries reasoning + the new output sub-fields
+    s = client.get("/api/summary").json()
+    assert s["mtd"]["reasoning_tokens"] >= 120
+    assert "output_audio_tokens" in s["mtd"]
+    assert "rejected_prediction_tokens" in s["mtd"]
+    # per-session summary carries reasoning for the reasoning-vs-answer split
+    d = client.get("/api/sessions/sess-1").json()
+    assert d["summary"]["reasoning_tokens"] == 120
+    assert d["summary"]["output_tokens"] >= 400
 
 
 def test_tools_endpoint_global_hotspots(client):

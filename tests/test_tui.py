@@ -36,8 +36,8 @@ async def _seed(tmp_path):
     now = int(time.time() * 1000)
     await db.insert_request(_full_request(
         request_id="r1", ts_ms=now, session_id="claude-code-7b3a4f",
-        input_tokens=1200, output_tokens=400, cache_read_tokens=800, cost_usd=0.05,
-        latency_ms=1800, start_ms=now - 1800, ttft_ms=250,
+        input_tokens=1200, output_tokens=400, reasoning_tokens=150, cache_read_tokens=800,
+        cost_usd=0.05, latency_ms=1800, start_ms=now - 1800, ttft_ms=250,
     ))
     await db.insert_request(_full_request(
         request_id="r2", ts_ms=now - 5000, session_id="codex-9d2e",
@@ -76,6 +76,8 @@ async def test_data_layer_queries(tmp_path):
         summary = tui.fetch_session_summary(con, "claude-code-7b3a4f")
         assert summary["requests"] == 1
         assert summary["cache_read"] == 800
+        assert summary["reasoning_tokens"] == 150  # output breakdown: reasoning vs answer
+        assert summary["output_tokens"] - summary["reasoning_tokens"] == 250  # answer
 
         ov = tui.fetch_overview(con)
         assert ov["today"]["requests"] >= 1

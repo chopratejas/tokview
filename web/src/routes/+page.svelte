@@ -304,6 +304,43 @@
     {/if}
   </div>
 
+  {#if (summary?.mtd?.output_tokens ?? 0) > 0}
+    {@const out = summary.mtd.output_tokens}
+    {@const reasoning = summary.mtd.reasoning_tokens ?? 0}
+    {@const answer = Math.max(0, out - reasoning)}
+    {@const inTok = summary.mtd.input_tokens ?? 0}
+    {@const outShare = inTok + out > 0 ? (100 * out) / (inTok + out) : 0}
+    <div class="panel output">
+      <h3>Output breakdown <span class="hint">month to date · what the model generated</span></h3>
+      <div class="output-grid">
+        <div class="output-total">
+          <div class="value">{fmtNum(out)}</div>
+          <div class="sub">output tokens · {outShare.toFixed(0)}% of all tokens</div>
+        </div>
+        <div class="output-bars">
+          <div class="out-row">
+            <span class="out-name">reasoning</span>
+            <span class="out-num">{fmtNum(reasoning)}</span>
+            <span class="out-pct">{out > 0 ? ((100 * reasoning) / out).toFixed(0) : 0}%</span>
+          </div>
+          <div class="bar-wrap"><div class="bar reasoning" style="width: {out > 0 ? (100 * reasoning) / out : 0}%"></div></div>
+          <div class="out-row">
+            <span class="out-name">answer + tool calls</span>
+            <span class="out-num">{fmtNum(answer)}</span>
+            <span class="out-pct">{out > 0 ? ((100 * answer) / out).toFixed(0) : 0}%</span>
+          </div>
+          <div class="bar-wrap"><div class="bar answer" style="width: {out > 0 ? (100 * answer) / out : 0}%"></div></div>
+          {#if (summary.mtd.output_audio_tokens ?? 0) > 0}
+            <div class="out-row"><span class="out-name">audio output</span><span class="out-num">{fmtNum(summary.mtd.output_audio_tokens)}</span><span class="out-pct"></span></div>
+          {/if}
+          {#if (summary.mtd.rejected_prediction_tokens ?? 0) > 0}
+            <div class="out-row"><span class="out-name">rejected predicted</span><span class="out-num">{fmtNum(summary.mtd.rejected_prediction_tokens)}</span><span class="out-pct"></span></div>
+          {/if}
+        </div>
+      </div>
+    </div>
+  {/if}
+
   <div class="grid-3">
     <div class="panel">
       <h3>By provider</h3>
@@ -462,6 +499,10 @@
           <div><span class="k">calls</span><span class="v">{fmtNum(sum.requests)}</span></div>
           <div><span class="k">cost</span><span class="v">{fmtUsd(sum.cost_usd)}</span></div>
           <div><span class="k">tokens</span><span class="v">{fmtNum(sum.input_tokens + sum.output_tokens)}</span></div>
+          <div><span class="k">output</span><span class="v">{fmtNum(sum.output_tokens)}</span></div>
+          {#if (sum.reasoning_tokens ?? 0) > 0}
+            <div><span class="k">reasoning</span><span class="v">{fmtNum(sum.reasoning_tokens)}</span></div>
+          {/if}
           <div><span class="k">duration</span><span class="v">{fmtMs(sum.span_ms)}</span></div>
           {#if sum.errors > 0}<div><span class="k">errors</span><span class="v err">{sum.errors}</span></div>{/if}
         </div>
@@ -716,6 +757,19 @@
   .hotspot-callout strong { color: var(--warn); }
   .share-cell { width: 30%; }
   .share-cell .tok-bar { position: static; transform: none; display: block; height: 8px; border-radius: 3px; background: var(--accent); }
+
+  /* output breakdown panel */
+  .output { margin-bottom: 24px; }
+  .output-grid { display: grid; grid-template-columns: minmax(160px, 220px) 1fr; gap: 24px; align-items: center; }
+  .output-total .value { font-size: 26px; font-weight: 600; font-family: var(--mono); }
+  .output-total .sub { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+  .output-bars { font-family: var(--mono); font-size: 12px; }
+  .out-row { display: flex; align-items: baseline; gap: 10px; padding: 2px 0; }
+  .out-row .out-name { flex: 1; color: var(--text); }
+  .out-row .out-num { color: var(--accent-2); }
+  .out-row .out-pct { color: var(--text-dim); width: 40px; text-align: right; }
+  .bar.reasoning { background: var(--accent-2); }
+  .bar.answer { background: var(--accent); }
 
   /* clickable session rows */
   .row-btn {

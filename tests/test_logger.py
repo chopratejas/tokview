@@ -147,6 +147,39 @@ def test_openai_cached_tokens_discount():
     assert row["input_tokens"] == 2000
 
 
+def test_output_subfields_captured():
+    """Output-side sub-fields from completion_tokens_details: reasoning,
+    output audio, and predicted-output accepted/rejected tokens."""
+    kwargs = make_kwargs(model="openai/gpt-4o", provider="openai", response_cost=0.01)
+    response = FakeResponse(
+        FakeUsage(
+            prompt_tokens=100,
+            completion_tokens=500,
+            completion_tokens_details={
+                "reasoning_tokens": 300,
+                "audio_tokens": 12,
+                "accepted_prediction_tokens": 40,
+                "rejected_prediction_tokens": 8,
+            },
+        )
+    )
+    row = build_row(kwargs=kwargs, response=response)
+    assert row["reasoning_tokens"] == 300
+    assert row["output_audio_tokens"] == 12
+    assert row["accepted_prediction_tokens"] == 40
+    assert row["rejected_prediction_tokens"] == 8
+    assert row["output_tokens"] - row["reasoning_tokens"] == 200  # answer
+
+
+def test_output_subfields_default_zero_when_absent():
+    kwargs = make_kwargs(model="openai/gpt-4o", provider="openai", response_cost=0.01)
+    response = FakeResponse(FakeUsage(prompt_tokens=10, completion_tokens=20))
+    row = build_row(kwargs=kwargs, response=response)
+    assert row["output_audio_tokens"] == 0
+    assert row["accepted_prediction_tokens"] == 0
+    assert row["rejected_prediction_tokens"] == 0
+
+
 def test_openai_o1_reasoning_tokens():
     """OpenAI o-series ('o1', 'o3') exposes reasoning tokens under
     completion_tokens_details — billed as output."""

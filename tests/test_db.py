@@ -109,6 +109,9 @@ async def test_migration_adds_columns_to_old_db(tmp_path):
             cols = {r[1] for r in await cur.fetchall()}
         assert "start_ms" in cols
         assert "ttft_ms" in cols
+        assert "output_audio_tokens" in cols
+        assert "accepted_prediction_tokens" in cols
+        assert "rejected_prediction_tokens" in cols
         assert await db.count_requests() == 1  # existing data preserved
     finally:
         await db.close()

@@ -163,6 +163,8 @@ def fetch_session_summary(con: sqlite3.Connection, sid: str) -> dict | None:
                COALESCE(SUM(cost_usd), 0) cost_usd,
                COALESCE(SUM(input_tokens), 0) input_tokens,
                COALESCE(SUM(output_tokens), 0) output_tokens,
+               COALESCE(SUM(reasoning_tokens), 0) reasoning_tokens,
+               COALESCE(SUM(output_audio_tokens), 0) output_audio_tokens,
                COALESCE(SUM(cache_read_tokens), 0) cache_read,
                COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) errors,
                MIN(ts_ms) first_ts_ms, MAX(ts_ms) last_ts_ms,
@@ -278,6 +280,29 @@ class SessionScreen(Screen):
         if summary["errors"]:
             head.append(f"  ·  ⚠ {summary['errors']} errors", style=f"bold {BAD}")
         head.append(f"\n{clip(summary['models'], 90)}", style=DIM)
+        # output breakdown: reasoning vs answer + session throughput
+        out_tok = int(summary["output_tokens"] or 0)
+        reasoning = int(summary["reasoning_tokens"] or 0)
+        answer = max(0, out_tok - reasoning)
+        gen_s = sum(
+            max(1, int(c["latency_ms"] or 0) - int(c["ttft_ms"] or 0))
+            for c in reqs
+            if c["ttft_ms"]
+        ) / 1000.0
+        gen_out = sum(int(c["output_tokens"] or 0) for c in reqs if c["ttft_ms"])
+        tps = gen_out / gen_s if gen_s > 0 else 0
+        head.append("\noutput ", style=DIM)
+        head.append(fmt_num(out_tok), style="bold")
+        if out_tok:
+            head.append(
+                f"  ·  reasoning {fmt_num(reasoning)} ({100 * reasoning / out_tok:.0f}%)",
+                style=ACCENT2,
+            )
+            head.append(f"  ·  answer {fmt_num(answer)}", style=DIM)
+        if int(summary["output_audio_tokens"] or 0):
+            head.append(f"  ·  audio {fmt_num(summary['output_audio_tokens'])}", style=CYAN)
+        if tps:
+            head.append(f"  ·  {tps:.0f} tok/s", style=GOOD)
         # token-hotspot insight
         if tools:
             top = tools[0]
@@ -520,6 +545,15 @@ class TokviewApp(App):
         if summary["errors"]:
             head.append(f"  ·  ⚠ {summary['errors']} errors", style=f"bold {BAD}")
         head.append(f"\n{clip(summary['models'], 70)}", style=DIM)
+        # output breakdown: reasoning vs answer (answer = output - reasoning)
+        out_tok = int(summary["output_tokens"] or 0)
+        reasoning = int(summary["reasoning_tokens"] or 0)
+        answer = max(0, out_tok - reasoning)
+        head.append("\noutput ", style=DIM)
+        head.append(fmt_num(out_tok), style="bold")
+        if out_tok:
+            head.append(f"  ·  reasoning {fmt_num(reasoning)} ({100 * reasoning / out_tok:.0f}%)", style=ACCENT2)
+            head.append(f"  ·  answer {fmt_num(answer)}", style=DIM)
         summ.update(head)
 
         # tools
