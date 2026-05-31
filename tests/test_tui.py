@@ -85,6 +85,83 @@ async def test_data_layer_queries(tmp_path):
         con.close()
 
 
+def test_tui_sync_connection_migrates_legacy_requests_table(tmp_path):
+    db_path = tmp_path / "legacy.sqlite"
+    con = sqlite3.connect(str(db_path))
+    con.row_factory = sqlite3.Row
+    con.executescript(
+        """
+        CREATE TABLE requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id TEXT UNIQUE NOT NULL,
+            ts_ms INTEGER NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            session_id TEXT,
+            user TEXT,
+            tags TEXT,
+            user_agent TEXT,
+            team_id TEXT,
+            input_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_read_1h_tokens INTEGER NOT NULL DEFAULT 0,
+            reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+            image_tokens INTEGER NOT NULL DEFAULT 0,
+            audio_tokens INTEGER NOT NULL DEFAULT 0,
+            cost_usd REAL NOT NULL,
+            cost_estimated INTEGER NOT NULL DEFAULT 0,
+            is_stream INTEGER NOT NULL,
+            completed INTEGER NOT NULL,
+            latency_ms INTEGER,
+            status_code INTEGER,
+            error_message TEXT,
+            prompt_text TEXT,
+            response_text TEXT
+        );
+        CREATE TABLE tool_calls (
+            tool_call_id TEXT PRIMARY KEY,
+            request_id TEXT,
+            session_id TEXT,
+            ts_ms INTEGER NOT NULL,
+            provider TEXT,
+            model TEXT,
+            tool_name TEXT NOT NULL,
+            arg_tokens INTEGER NOT NULL DEFAULT 0,
+            result_tokens INTEGER NOT NULL DEFAULT 0,
+            total_tokens INTEGER NOT NULL DEFAULT 0
+        );
+        """
+    )
+    now = int(time.time() * 1000)
+    con.execute(
+        """
+        INSERT INTO requests (
+            request_id, ts_ms, provider, model, session_id, user_agent,
+            input_tokens, output_tokens, cost_usd, is_stream, completed, status_code
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("legacy-r1", now, "openai", "gpt-5.5", "legacy-session", "test", 10, 2, 0.01, 1, 1, 200),
+    )
+    con.commit()
+
+    try:
+        tui.ensure_schema(con)
+        columns = {row[1] for row in con.execute("PRAGMA table_info(requests)").fetchall()}
+        assert "output_audio_tokens" in columns
+        assert "accepted_prediction_tokens" in columns
+        assert "rejected_prediction_tokens" in columns
+        assert "start_ms" in columns
+        assert "ttft_ms" in columns
+
+        summary = tui.fetch_session_summary(con, "legacy-session")
+        assert summary is not None
+        assert summary["requests"] == 1
+        assert summary["output_audio_tokens"] == 0
+    finally:
+        con.close()
+
 def test_formatters():
     assert tui.fmt_num(1_240_000) == "1.2M"
     assert tui.fmt_num(410) == "410"

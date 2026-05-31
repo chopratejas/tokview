@@ -24,6 +24,8 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
 
+from tokview.db import _MIGRATION_COLUMNS, SCHEMA
+
 # Brand palette (matches the web dashboard).
 ACCENT = "#7c5cff"
 ACCENT2 = "#58a6ff"
@@ -95,6 +97,21 @@ def cost_color(value: float | None) -> str:
 # --------------------------------------------------------------------------- #
 # data layer (synchronous sqlite; queries are sub-ms at laptop scale)
 # --------------------------------------------------------------------------- #
+def ensure_schema(con: sqlite3.Connection) -> None:
+    """Initialize/migrate the DB for read-only TUI connections.
+
+    The writer normally runs migrations via Database.open(), but `tokview show`
+    may be the first command a user runs after upgrading. Keep the TUI tolerant
+    of old on-disk databases.
+    """
+    con.executescript(SCHEMA)
+    existing = {row[1] for row in con.execute("PRAGMA table_info(requests)").fetchall()}
+    for name, sql_type in _MIGRATION_COLUMNS:
+        if name not in existing:
+            con.execute(f"ALTER TABLE requests ADD COLUMN {name} {sql_type}")
+    con.commit()
+
+
 def _utc_today_start_ms() -> int:
     now = datetime.now(UTC)
     return int(datetime(now.year, now.month, now.day, tzinfo=UTC).timestamp() * 1000)
@@ -248,6 +265,7 @@ class SessionScreen(Screen):
     def _connect(self) -> sqlite3.Connection:
         con = sqlite3.connect(str(self.db_path))
         con.row_factory = sqlite3.Row
+        ensure_schema(con)
         return con
 
     def refresh_detail(self) -> None:
@@ -455,6 +473,7 @@ class TokviewApp(App):
     def _connect(self) -> sqlite3.Connection:
         con = sqlite3.connect(str(self.db_path))
         con.row_factory = sqlite3.Row
+        ensure_schema(con)
         return con
 
     def refresh_data(self) -> None:
