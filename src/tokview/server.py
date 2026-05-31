@@ -162,6 +162,75 @@ normalize_anthropic_model = normalize_litellm_model
 
 CHATGPT_CODEX_RESPONSES_HTTP = "https://chatgpt.com/backend-api/codex/responses"
 ANTHROPIC_MESSAGES_HTTP = "https://api.anthropic.com/v1/messages"
+MAX_PROXY_BODY_BYTES = 32 * 1024 * 1024
+MAX_PROXY_CAPTURE_BYTES = 8 * 1024 * 1024
+
+
+class ProxyPayloadTooLarge(Exception):
+    """Raised when a local proxy request exceeds tokview's forwarding limit."""
+
+
+class _CappedBodyCapture:
+    """Keep enough upstream bytes for accounting without unbounded memory growth."""
+
+    def __init__(self, max_bytes: int = MAX_PROXY_CAPTURE_BYTES) -> None:
+        self.max_bytes = max(0, max_bytes)
+        self._body = bytearray()
+        self.truncated = False
+
+    def add(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        remaining = self.max_bytes - len(self._body)
+        if remaining > 0:
+            self._body.extend(chunk[:remaining])
+        if len(chunk) > remaining:
+            self.truncated = True
+
+    @property
+    def body(self) -> bytes:
+        return bytes(self._body)
+
+
+async def _read_limited_body(
+    receive: Receive, *, max_bytes: int = MAX_PROXY_BODY_BYTES
+) -> bytes:
+    """Read one ASGI HTTP request body, rejecting it once it exceeds max_bytes."""
+    body = bytearray()
+    more_body = True
+    while more_body:
+        message = await receive()
+        chunk = message.get("body", b"")
+        if chunk:
+            if len(body) + len(chunk) > max_bytes:
+                raise ProxyPayloadTooLarge
+            body.extend(chunk)
+        more_body = bool(message.get("more_body", False))
+    return bytes(body)
+
+
+async def _send_json_error(send: Send, status_code: int, message: str) -> None:
+    body = json.dumps({"error": {"message": message}}).encode("utf-8")
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status_code,
+            "headers": [(b"content-type", b"application/json")],
+        }
+    )
+    await send({"type": "http.response.body", "body": body, "more_body": False})
+
+
+def _httpx_timeout() -> Any:
+    import httpx
+
+    return httpx.Timeout(
+        timeout=300.0,
+        connect=30.0,
+        read=300.0,
+        write=30.0,
+        pool=30.0,
+    )
 
 
 class NativeSubscriptionMiddleware:
@@ -201,12 +270,11 @@ class NativeSubscriptionMiddleware:
             await self.app(scope, receive, send)
             return
 
-        body = b""
-        more_body = True
-        while more_body:
-            message = await receive()
-            body += message.get("body", b"")
-            more_body = bool(message.get("more_body", False))
+        try:
+            body = await _read_limited_body(receive)
+        except ProxyPayloadTooLarge:
+            await _send_json_error(send, 413, "request body too large")
+            return
 
         start_ms = int(time.time() * 1000)
         request_id = f"tokview-codex-{start_ms}-{id(scope)}"
@@ -264,7 +332,7 @@ class NativeSubscriptionMiddleware:
             text = first.get("text")
             if text is None and first.get("bytes") is not None:
                 text = first["bytes"].decode("utf-8", errors="replace")
-            request_body = json.dumps(_normalize_ws_response_create(text or "{}")).encode("utf-8")
+            request_body = _ws_response_create_body(text or "{}")
             status_code, _, response_body, error_message = await _post_responses(
                 url=CHATGPT_CODEX_RESPONSES_HTTP + "?stream=true",
                 headers=upstream_headers,
@@ -278,6 +346,15 @@ class NativeSubscriptionMiddleware:
             else:
                 decoded = response_body.decode("utf-8", errors="replace")
                 await send({"type": "websocket.send", "text": decoded})
+        except ProxyPayloadTooLarge:
+            status_code = 413
+            error_message = "request body too large"
+            await send(
+                {
+                    "type": "websocket.send",
+                    "text": json.dumps({"type": "error", "error": {"message": error_message}}),
+                }
+            )
         except Exception as exc:
             error_message = f"{type(exc).__name__}: {exc}"
             await send(
@@ -308,12 +385,11 @@ class NativeSubscriptionMiddleware:
             await self.app(scope, receive, send)
             return
 
-        body = b""
-        more_body = True
-        while more_body:
-            message = await receive()
-            body += message.get("body", b"")
-            more_body = bool(message.get("more_body", False))
+        try:
+            body = await _read_limited_body(receive)
+        except ProxyPayloadTooLarge:
+            await _send_json_error(send, 413, "request body too large")
+            return
 
         request_json = _loads_json(body) or {}
         start_ms = int(time.time() * 1000)
@@ -619,13 +695,14 @@ async def _stream_post_responses(
     *, url: str, headers: dict[str, str], body: bytes, send: Send
 ) -> tuple[int, bytes, str | None]:
     status_code = 502
-    response_body = b""
+    capture = _CappedBodyCapture()
     error_message: str | None = None
+    response_started = False
     try:
         import httpx
 
         async with (
-            httpx.AsyncClient(timeout=None) as client,
+            httpx.AsyncClient(timeout=_httpx_timeout()) as client,
             client.stream(
                 "POST",
                 url,
@@ -641,26 +718,27 @@ async def _stream_post_responses(
                     "headers": _response_headers(response.headers),
                 }
             )
-            chunks: list[bytes] = []
+            response_started = True
             async for chunk in response.aiter_bytes():
                 if not chunk:
                     continue
-                chunks.append(chunk)
+                capture.add(chunk)
                 await send({"type": "http.response.body", "body": chunk, "more_body": True})
-            response_body = b"".join(chunks)
             await send({"type": "http.response.body", "body": b"", "more_body": False})
     except Exception as exc:
         error_message = f"{type(exc).__name__}: {exc}"
-        response_body = json.dumps({"error": {"message": error_message}}).encode("utf-8")
-        await send(
-            {
-                "type": "http.response.start",
-                "status": status_code,
-                "headers": [(b"content-type", b"application/json")],
-            }
-        )
-        await send({"type": "http.response.body", "body": response_body, "more_body": False})
-    return status_code, response_body, error_message
+        if not response_started:
+            capture = _CappedBodyCapture()
+            capture.add(json.dumps({"error": {"message": error_message}}).encode("utf-8"))
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": status_code,
+                    "headers": [(b"content-type", b"application/json")],
+                }
+            )
+            await send({"type": "http.response.body", "body": capture.body, "more_body": False})
+    return status_code, capture.body, error_message
 
 
 async def _post_responses(
@@ -673,16 +751,18 @@ async def _post_responses(
     try:
         import httpx
 
-        async with httpx.AsyncClient(timeout=None) as client:
-            response = await client.request(
-                "POST",
-                url,
-                headers=_upstream_headers(headers),
-                content=body,
-            )
-        status_code = response.status_code
-        response_body = response.content
-        response_headers = _response_headers(response.headers)
+        capture = _CappedBodyCapture()
+        async with httpx.AsyncClient(timeout=_httpx_timeout()) as client, client.stream(
+            "POST",
+            url,
+            headers=_upstream_headers(headers),
+            content=body,
+        ) as response:
+            status_code = response.status_code
+            response_headers = _response_headers(response.headers)
+            async for chunk in response.aiter_bytes():
+                capture.add(chunk)
+        response_body = capture.body
     except Exception as exc:
         error_message = f"{type(exc).__name__}: {exc}"
         response_body = json.dumps({"error": {"message": error_message}}).encode("utf-8")
@@ -705,6 +785,13 @@ def _normalize_ws_response_create(raw: str) -> dict[str, Any]:
         if body.get("type") == "response.create":
             body.pop("type", None)
     body["stream"] = True
+    return body
+
+
+def _ws_response_create_body(raw: str, *, max_bytes: int = MAX_PROXY_BODY_BYTES) -> bytes:
+    body = json.dumps(_normalize_ws_response_create(raw)).encode("utf-8")
+    if len(body) > max_bytes:
+        raise ProxyPayloadTooLarge
     return body
 
 
@@ -951,8 +1038,9 @@ def _sse_json_events(body: bytes) -> list[dict[str, Any]]:
 class ModelPrefixMiddleware:
     """Rewrite bare provider model names in JSON requests before LiteLLM routes."""
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, max_body_bytes: int = MAX_PROXY_BODY_BYTES) -> None:
         self.app = app
+        self.max_body_bytes = max_body_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -967,12 +1055,11 @@ class ModelPrefixMiddleware:
             await self.app(scope, receive, send)
             return
 
-        body = b""
-        more_body = True
-        while more_body:
-            message = await receive()
-            body += message.get("body", b"")
-            more_body = bool(message.get("more_body", False))
+        try:
+            body = await _read_limited_body(receive, max_bytes=self.max_body_bytes)
+        except ProxyPayloadTooLarge:
+            await _send_json_error(send, 413, "request body too large")
+            return
 
         rewritten = _rewrite_model_body(body)
         if rewritten != body:

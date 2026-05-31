@@ -7,17 +7,23 @@ import json
 import pytest
 
 from tokview.server import (
+    ModelPrefixMiddleware,
+    ProxyPayloadTooLarge,
     _anthropic_cost_usd,
     _anthropic_usage,
+    _CappedBodyCapture,
     _client_label,
     _fallback_session_id,
+    _httpx_timeout,
     _is_anthropic_native_auth,
     _litellm_provider_prefix,
     _normalize_ws_response_create,
+    _read_limited_body,
     _resolve_codex_routing_headers,
     _responses_cost_usd,
     _responses_usage,
     _rewrite_model_body,
+    _ws_response_create_body,
     normalize_litellm_model,
 )
 
@@ -213,6 +219,13 @@ def test_normalize_ws_response_create_handles_inline_response_body():
     }
 
 
+def test_ws_response_create_body_rejects_oversized_frame():
+    frame = json.dumps({"type": "response.create", "input": "abcdef"})
+
+    with pytest.raises(ProxyPayloadTooLarge):
+        _ws_response_create_body(frame, max_bytes=10)
+
+
 def test_fallback_session_id_is_stable_for_same_conversation_seed():
     headers = {"user-agent": "codex-cli/0.135.0"}
     first = _fallback_session_id(
@@ -291,3 +304,74 @@ def test_anthropic_cost_uses_litellm_pricing():
     )
 
     assert cost > 0
+
+
+@pytest.mark.asyncio
+async def test_read_limited_body_rejects_oversized_request():
+    messages = [
+        {"type": "http.request", "body": b"abc", "more_body": True},
+        {"type": "http.request", "body": b"def", "more_body": False},
+    ]
+
+    async def receive():
+        return messages.pop(0)
+
+    with pytest.raises(ProxyPayloadTooLarge):
+        await _read_limited_body(receive, max_bytes=5)
+
+
+def test_capped_body_capture_keeps_memory_bounded():
+    capture = _CappedBodyCapture(max_bytes=5)
+
+    capture.add(b"abc")
+    capture.add(b"def")
+
+    assert capture.body == b"abcde"
+    assert capture.truncated is True
+
+
+def test_httpx_timeout_is_finite():
+    timeout = _httpx_timeout()
+
+    assert timeout.connect is not None
+    assert timeout.read is not None
+    assert timeout.write is not None
+    assert timeout.pool is not None
+
+
+@pytest.mark.asyncio
+async def test_model_prefix_middleware_rejects_oversized_json_body():
+    app_called = False
+
+    async def app(scope, receive, send):
+        nonlocal app_called
+        app_called = True
+
+    middleware = ModelPrefixMiddleware(app, max_body_bytes=5)
+    sent = []
+
+    async def receive():
+        return {
+            "type": "http.request",
+            "body": b'{"model":"gpt-4o-mini"}',
+            "more_body": False,
+        }
+
+    async def send(message):
+        sent.append(message)
+
+    await middleware(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "headers": [(b"content-type", b"application/json")],
+        },
+        receive,
+        send,
+    )
+
+    assert app_called is False
+    assert sent[0]["type"] == "http.response.start"
+    assert sent[0]["status"] == 413
+    assert json.loads(sent[1]["body"])["error"]["message"] == "request body too large"

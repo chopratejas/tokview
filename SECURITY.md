@@ -32,6 +32,7 @@ tokview's stance, by design:
 | **Unknown / new model has no pricing → silent $0** | Guardrail: rows where `total_tokens > 0 AND cost = 0 AND cost_estimated = 0` are counted in `/api/diagnostics.metrics.missing_pricing` and surfaced via `tokview status`. |
 | **Provider API keys leaked to logs** | tokview never reads or persists provider keys. Keys live in environment variables and are forwarded by LiteLLM directly to the provider. The tokview log file (`~/.tokview/tokview.log`) contains LiteLLM proxy logs + uvicorn access logs only. |
 | **Dashboard exposed to the network** | Default `bind: 127.0.0.1`. A non-loopback bind requires *both* the config setting AND the explicit `tokview start --allow-remote` flag. v1 has no authentication; we refuse to start without explicit operator opt-in. |
+| **Native passthrough resource exhaustion** | Native Codex/Claude passthrough requests are capped before forwarding, upstream response capture for accounting is bounded, and outbound HTTP calls use finite connect/read/write/pool timeouts. |
 | **Prompt content stored at rest** | Default off. When opt-in capture is enabled, regex-based redaction runs *before* persistence — the database never holds the raw secret. |
 
 ## What tokview does NOT defend against
