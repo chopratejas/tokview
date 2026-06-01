@@ -7,6 +7,8 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.0.7] — 2026-06-01
+
 ### Added
 - **`tokview import`** — backfill historical usage from local agent logs, no
   proxy needed. Both write into the same SQLite the live proxy uses, so imported
@@ -155,7 +157,8 @@ First release. A small, local, single-user token viewer.
 - Default bind `127.0.0.1`. A non-loopback bind requires `--allow-remote` on
   the CLI **and** the corresponding config setting.
 
-[Unreleased]: https://github.com/chopratejas/tokview/compare/v0.0.6...HEAD
+[Unreleased]: https://github.com/chopratejas/tokview/compare/v0.0.7...HEAD
+[0.0.7]: https://github.com/chopratejas/tokview/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/chopratejas/tokview/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/chopratejas/tokview/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/chopratejas/tokview/compare/v0.0.2...v0.0.4

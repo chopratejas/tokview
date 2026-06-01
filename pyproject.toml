@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 # `tokview`; PyPI rejects `tokview` as too similar to an existing project, so
 # the install name is `token-viewer` (like `pip install pillow` -> `import PIL`).
 name = "token-viewer"
-version = "0.0.6"
+version = "0.0.7"
 description = "See where your LLM tokens actually go — down to the individual tool call. A small, local, zero-config proxy + dashboard that tracks exact token usage and cost across Claude / OpenAI / Gemini, and breaks input-token spend down per tool (Read, Bash, MCP, ...)."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
