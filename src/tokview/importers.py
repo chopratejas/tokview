@@ -12,15 +12,21 @@ Idempotent: requests are keyed by the transcript line uuid and tool calls by
 the provider tool id, so re-running an import never double-counts (INSERT OR
 IGNORE) and overlap with live-proxied sessions is harmless.
 
-Codex note: ``~/.codex/sessions/*.json`` rollouts do NOT record token counts,
-so historical Codex usage can't be reconstructed accurately — only live
-``tokview wrap codex`` captures Codex tokens.
+Codex (current CLI) writes JSONL rollouts under
+``~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`` that persist per-turn token
+usage as ``token_count`` events (since late 2025). We reconstruct per-turn usage
+by diffing the cumulative ``total_token_usage`` between consecutive events —
+which also sidesteps the rate-limit-only re-emit over-count — and pair
+``function_call`` / ``function_call_output`` items into per-tool estimates.
+Older Codex rollouts predate token-usage logging and are skipped.
 """
 from __future__ import annotations
 
 import glob
 import json
 import os
+import re
+import shlex
 import sqlite3
 from collections.abc import Callable
 from datetime import datetime
@@ -28,9 +34,10 @@ from pathlib import Path
 from typing import Any
 
 from .insights import PricingMap, unit_prices
-from .tools import parse_completed_tool_calls
+from .tools import _as_text, _safe_count, parse_completed_tool_calls
 
 CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
+CODEX_SESSIONS = Path.home() / ".codex" / "sessions"
 
 CountTokens = Callable[[str, str], int]
 
@@ -233,6 +240,267 @@ def import_claude_code(
             stats["sessions"] += 1
         req_batch.extend(r for r in reqs if r["request_id"])
         tool_batch.extend(tools)
+        if len(req_batch) >= 500 or len(tool_batch) >= 500:
+            stats["requests"] += _insert_requests(con, req_batch)
+            stats["tool_calls"] += _insert_tools(con, tool_batch)
+            req_batch, tool_batch = [], []
+        if progress and (i % 200 == 0 or i == len(files)):
+            progress(i, len(files))
+
+    stats["requests"] += _insert_requests(con, req_batch)
+    stats["tool_calls"] += _insert_tools(con, tool_batch)
+    con.commit()
+    return stats
+
+
+# --------------------------------------------------------------------------- #
+# Codex (current CLI rollouts)
+# --------------------------------------------------------------------------- #
+_UUID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
+)
+_SHELL_TOOLS = frozenset(
+    {"shell", "exec_command", "local_shell", "local_shell_call", "container.exec"}
+)
+_SHELL_WRAPPERS = frozenset({"bash", "sh", "zsh"})
+
+
+def _codex_session_id_from_path(path: str) -> str | None:
+    """Recover the conversation id from a ``rollout-...-<uuid>.jsonl`` filename."""
+    base = os.path.basename(path)
+    m = _UUID_RE.search(base)
+    if m:
+        return m.group(0)
+    return base[: -len(".jsonl")] if base.endswith(".jsonl") else base or None
+
+
+def _codex_command_parts(arguments: str) -> list[str]:
+    """Split a Codex shell call's ``command`` into argv parts.
+
+    Codex passes shell args as a JSON string, e.g.
+    ``{"command": ["bash", "-lc", "grep -rn foo src"]}`` (a list) or, less often,
+    ``{"command": "grep -rn foo"}`` (a string). For the ``bash -lc "<script>"``
+    wrapper the real command lives in the script, so we unwrap and re-split it.
+    """
+    try:
+        parsed = json.loads(arguments) if arguments else None
+    except Exception:
+        return []
+    if not isinstance(parsed, dict):
+        return []
+    cmd = parsed.get("command") or parsed.get("cmd")
+    if isinstance(cmd, list):
+        parts = [str(p) for p in cmd]
+        if len(parts) >= 3 and parts[0] in _SHELL_WRAPPERS and parts[1] in {"-lc", "-c", "-l"}:
+            return _shell_split(parts[2])
+        return parts
+    if isinstance(cmd, str) and cmd.strip():
+        return _shell_split(cmd)
+    return []
+
+
+def _shell_split(command: str) -> list[str]:
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return command.split()
+
+
+def _codex_tool_name(name: str, arguments: str) -> str:
+    """Surface the underlying program for Codex shell calls (``grep``, ``pytest``…)."""
+    if name not in _SHELL_TOOLS:
+        return name or "unknown"
+    parts = _codex_command_parts(arguments)
+    if not parts:
+        return name
+    if parts[0] == "rtk" and len(parts) > 1:
+        return f"rtk {parts[1]}"
+    return os.path.basename(parts[0]) or name
+
+
+def _codex_meta(payload: dict[str, Any]) -> dict[str, Any]:
+    """Session/turn metadata may be nested under ``meta`` depending on version."""
+    inner = payload.get("meta")
+    return inner if isinstance(inner, dict) else payload
+
+
+def parse_codex_rollout(
+    lines: list[dict[str, Any]],
+    pricing: PricingMap,
+    count_tokens: CountTokens = _fast_count_tokens,
+    default_session_id: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Turn one Codex rollout (list of ``RolloutLine`` dicts) into rows.
+
+    Per-turn usage is the delta of the cumulative ``total_token_usage`` between
+    consecutive ``token_count`` events. Diffing the running total (rather than
+    summing each event's ``last_token_usage``) naturally drops the rate-limit
+    re-emits that would otherwise double-count.
+    """
+    request_rows: list[dict[str, Any]] = []
+    tool_uses: dict[str, dict[str, str]] = {}
+    tool_outputs: dict[str, str] = {}
+    session_id = default_session_id
+    model: str | None = None
+    last_ts = 0
+    prev = {"input": 0, "cached": 0, "output": 0, "reasoning": 0, "total": 0}
+    turn_idx = 0
+
+    for entry in lines:
+        if not isinstance(entry, dict):
+            continue
+        rtype = entry.get("type")
+        payload = entry.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        ts_ms = _iso_to_ms(entry.get("timestamp"))
+        if ts_ms:
+            last_ts = max(last_ts, ts_ms)
+
+        if rtype == "session_meta":
+            meta = _codex_meta(payload)
+            session_id = meta.get("id") or session_id
+            model = model or meta.get("model")
+            continue
+        if rtype == "turn_context":
+            model = _codex_meta(payload).get("model") or model
+            continue
+        if rtype == "response_item":
+            itype = payload.get("type")
+            cid = payload.get("call_id") or payload.get("id")
+            if itype == "function_call" and cid:
+                arg_text = _as_text(payload.get("arguments"))
+                tool_uses[cid] = {
+                    "name": _codex_tool_name(payload.get("name") or "unknown", arg_text),
+                    "arg_text": arg_text,
+                }
+            elif itype == "function_call_output" and cid:
+                tool_outputs[cid] = _as_text(payload.get("output"))
+            continue
+        if rtype != "event_msg" or payload.get("type") != "token_count":
+            continue
+
+        info = payload.get("info")
+        total = info.get("total_token_usage") if isinstance(info, dict) else None
+        if not isinstance(total, dict):
+            continue
+        cur = {
+            "input": int(total.get("input_tokens") or 0),
+            "cached": int(total.get("cached_input_tokens") or 0),
+            "output": int(total.get("output_tokens") or 0),
+            "reasoning": int(total.get("reasoning_output_tokens") or 0),
+            "total": int(total.get("total_tokens") or 0),
+        }
+        d_in = max(0, cur["input"] - prev["input"])
+        d_cached = max(0, cur["cached"] - prev["cached"])
+        d_out = max(0, cur["output"] - prev["output"])
+        d_reason = max(0, cur["reasoning"] - prev["reasoning"])
+        d_total = max(0, cur["total"] - prev["total"])
+        prev = cur
+        if d_in == 0 and d_out == 0 and d_total == 0:
+            continue  # rate-limit-only re-emit — no new usage this event
+
+        mdl = model or "gpt-5"
+        non_cache_input = max(0, d_in - d_cached)  # cost only: Codex input includes cached
+        request_rows.append(
+            {
+                "request_id": f"codex:{session_id}:{turn_idx}",
+                "ts_ms": ts_ms or last_ts or 0,
+                "provider": "openai",
+                "model": mdl,
+                "session_id": session_id,
+                "user": None,
+                "tags": None,
+                "user_agent": "import:codex",
+                "team_id": None,
+                # store the full input (incl cached) to match live OpenAI rows
+                "input_tokens": d_in,
+                "output_tokens": d_out,  # includes reasoning (OpenAI bills it as output)
+                "cache_creation_tokens": 0,
+                "cache_read_tokens": d_cached,
+                "cache_read_1h_tokens": 0,
+                "reasoning_tokens": d_reason,
+                "image_tokens": 0,
+                "audio_tokens": 0,
+                "output_audio_tokens": None,
+                "accepted_prediction_tokens": None,
+                "rejected_prediction_tokens": None,
+                "cost_usd": estimated_cost(mdl, non_cache_input, d_out, d_cached, 0, pricing),
+                "cost_estimated": 1,
+                "is_stream": 0,
+                "completed": 1,
+                "latency_ms": None,
+                "start_ms": None,
+                "ttft_ms": None,
+                "status_code": 200,
+                "error_message": None,
+                "prompt_text": None,
+                "response_text": None,
+            }
+        )
+        turn_idx += 1
+
+    tool_rows: list[dict[str, Any]] = []
+    tool_model = model or "gpt-5"
+    for cid, use in tool_uses.items():
+        if cid not in tool_outputs:
+            continue  # pending — result never sent back, so it never cost input
+        arg_tokens = _safe_count(count_tokens, tool_model, use["arg_text"])
+        result_tokens = _safe_count(count_tokens, tool_model, tool_outputs[cid])
+        tool_rows.append(
+            {
+                "tool_call_id": cid,
+                "request_id": None,
+                "session_id": session_id,
+                "ts_ms": last_ts or 0,
+                "provider": "openai",
+                "model": tool_model,
+                "tool_name": use["name"],
+                "arg_tokens": arg_tokens,
+                "result_tokens": result_tokens,
+                "total_tokens": arg_tokens + result_tokens,
+            }
+        )
+    return request_rows, tool_rows
+
+
+def import_codex(
+    con: sqlite3.Connection,
+    pricing: PricingMap,
+    codex_dir: Path = CODEX_SESSIONS,
+    count_tokens: CountTokens = _fast_count_tokens,
+    progress: Callable[[int, int], None] | None = None,
+) -> dict[str, int]:
+    """Import every Codex rollout under ``codex_dir`` into ``con``.
+
+    Returns counts: files, sessions (rollouts with usable usage), requests,
+    tool_calls, and skipped_no_usage (older rollouts that predate token logging).
+    """
+    files = sorted(glob.glob(os.path.join(str(codex_dir), "**", "*.jsonl"), recursive=True))
+    stats = {
+        "files": len(files),
+        "sessions": 0,
+        "requests": 0,
+        "tool_calls": 0,
+        "skipped_no_usage": 0,
+    }
+    req_batch: list[dict[str, Any]] = []
+    tool_batch: list[dict[str, Any]] = []
+
+    for i, fp in enumerate(files, 1):
+        lines = _read_jsonl(fp)
+        if lines:
+            reqs, tools = parse_codex_rollout(
+                lines, pricing, count_tokens, default_session_id=_codex_session_id_from_path(fp)
+            )
+            if reqs:
+                stats["sessions"] += 1
+                req_batch.extend(r for r in reqs if r["request_id"])
+                tool_batch.extend(tools)
+            elif tools:
+                # rollout predates token-usage logging — skip it whole so we
+                # never show tool tokens with no request usage behind them.
+                stats["skipped_no_usage"] += 1
         if len(req_batch) >= 500 or len(tool_batch) >= 500:
             stats["requests"] += _insert_requests(con, req_batch)
             stats["tool_calls"] += _insert_tools(con, tool_batch)

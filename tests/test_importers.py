@@ -17,7 +17,12 @@ PRICING = {
         "output_cost_per_token": 15e-6,
         "cache_read_input_token_cost": 0.3e-6,
         "cache_creation_input_token_cost": 3.75e-6,
-    }
+    },
+    "gpt-5-codex": {
+        "input_cost_per_token": 1.25e-6,
+        "output_cost_per_token": 10e-6,
+        "cache_read_input_token_cost": 0.125e-6,
+    },
 }
 
 
@@ -130,4 +135,140 @@ def test_empty_and_malformed_lines_are_skipped(tmp_path):
     ensure_schema(con)
     stats = importers.import_claude_code(con, PRICING, claude_dir=proj, count_tokens=wc)
     assert stats["requests"] == 0  # no assistant/usage lines
+    con.close()
+
+
+# --------------------------------------------------------------------------- #
+# Codex (current CLI rollout format)
+# --------------------------------------------------------------------------- #
+def _rl(rtype, payload, ts="2025-09-10T10:00:00.000Z"):
+    """A Codex RolloutLine envelope."""
+    return {"timestamp": ts, "type": rtype, "payload": payload}
+
+
+def _tok(in_, cached, out, reasoning, total):
+    return {
+        "type": "token_count",
+        "info": {
+            "total_token_usage": {
+                "input_tokens": in_,
+                "cached_input_tokens": cached,
+                "output_tokens": out,
+                "reasoning_output_tokens": reasoning,
+                "total_tokens": total,
+            },
+            "last_token_usage": {},
+            "model_context_window": 272000,
+        },
+        "rate_limits": None,
+    }
+
+
+SHELL_ARGS = '{"command": ["bash", "-lc", "grep -rn foo src"]}'
+
+CODEX_ROLLOUT = [
+    _rl("session_meta", {"id": "codex-sess-1", "cwd": "/repo", "cli_version": "0.41.0"}),
+    _rl("turn_context", {"cwd": "/repo", "model": "gpt-5-codex", "effort": "medium"}),
+    _rl("response_item", {"type": "message", "role": "user",
+                          "content": [{"type": "input_text", "text": "find foo"}]}),
+    _rl("response_item", {"type": "function_call", "name": "shell",
+                          "arguments": SHELL_ARGS, "call_id": "call_1"}),
+    _rl("response_item", {"type": "function_call_output", "call_id": "call_1",
+                          "output": "alpha beta gamma"}),
+    # turn 1 cumulative usage
+    _rl("event_msg", _tok(1000, 200, 300, 100, 1300)),
+    # turn 2 cumulative usage (deltas: in 1500, cached 600, out 400, reason 150)
+    _rl("event_msg", _tok(2500, 800, 700, 250, 3200)),
+    # rate-limit-only re-emit: identical totals -> must be skipped (no double count)
+    _rl("event_msg", _tok(2500, 800, 700, 250, 3200)),
+]
+
+
+def test_parse_codex_rollout_requests_and_tools():
+    reqs, tools = importers.parse_codex_rollout(CODEX_ROLLOUT, PRICING, count_tokens=wc)
+
+    assert len(reqs) == 2  # re-emit dropped
+    r0, r1 = reqs
+    assert r0["request_id"] == "codex:codex-sess-1:0"
+    assert r1["request_id"] == "codex:codex-sess-1:1"
+    assert r0["provider"] == "openai"
+    assert r0["model"] == "gpt-5-codex"
+    assert r0["user_agent"] == "import:codex"
+    assert r0["session_id"] == "codex-sess-1"
+    assert r0["cost_estimated"] == 1
+
+    # turn 1: full input incl cached; cache_read is the cached subset
+    assert r0["input_tokens"] == 1000 and r0["cache_read_tokens"] == 200
+    assert r0["output_tokens"] == 300 and r0["reasoning_tokens"] == 100
+    # cost prices the non-cache input (1000-200) + output + cached-at-cache-rate
+    exp0 = round((1000 - 200) * 1.25e-6 + 300 * 10e-6 + 200 * 0.125e-6, 6)
+    assert r0["cost_usd"] == exp0
+
+    # turn 2: deltas of the cumulative totals
+    assert r1["input_tokens"] == 1500 and r1["cache_read_tokens"] == 600
+    assert r1["output_tokens"] == 400 and r1["reasoning_tokens"] == 150
+
+    assert len(tools) == 1
+    assert tools[0]["tool_name"] == "grep"  # unwrapped from bash -lc "grep ..."
+    assert tools[0]["tool_call_id"] == "call_1"
+    assert tools[0]["result_tokens"] == 3  # "alpha beta gamma"
+    assert tools[0]["arg_tokens"] == len(SHELL_ARGS.split())
+    assert tools[0]["total_tokens"] == tools[0]["arg_tokens"] + 3
+
+
+def test_import_codex_into_db_and_idempotent(tmp_path):
+    sessions = tmp_path / "sessions" / "2025" / "09" / "10"
+    sessions.mkdir(parents=True)
+    fp = sessions / "rollout-2025-09-10T10-00-00-codex-sess-1.jsonl"
+    fp.write_text("\n".join(json.dumps(x) for x in CODEX_ROLLOUT))
+
+    db_path = tmp_path / "db.sqlite"
+    con = sqlite3.connect(str(db_path))
+    con.row_factory = sqlite3.Row
+    ensure_schema(con)
+
+    src = tmp_path / "sessions"
+    stats = importers.import_codex(con, PRICING, codex_dir=src, count_tokens=wc)
+    assert stats["files"] == 1
+    assert stats["sessions"] == 1
+    assert stats["requests"] == 2
+    assert stats["tool_calls"] == 1
+    assert stats["skipped_no_usage"] == 0
+
+    row = con.execute(
+        "SELECT provider, session_id, reasoning_tokens FROM requests ORDER BY request_id"
+    ).fetchone()
+    assert row["provider"] == "openai"
+    assert row["session_id"] == "codex-sess-1"
+    assert row["reasoning_tokens"] == 100
+
+    # re-import: idempotent (INSERT OR IGNORE by synthesized request_id / call_id)
+    stats2 = importers.import_codex(con, PRICING, codex_dir=src, count_tokens=wc)
+    assert stats2["requests"] == 0 and stats2["tool_calls"] == 0
+    assert con.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 2
+    con.close()
+
+
+def test_codex_rollout_without_token_usage_is_skipped(tmp_path):
+    # Pre-2025-09 shape: messages + tool calls, but no token_count events.
+    old = [
+        _rl("session_meta", {"id": "old-sess", "cwd": "/repo"}),
+        _rl("response_item", {"type": "function_call", "name": "shell",
+                              "arguments": SHELL_ARGS, "call_id": "c1"}),
+        _rl("response_item", {"type": "function_call_output", "call_id": "c1",
+                              "output": "x y z"}),
+    ]
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    (sessions / "rollout-old.jsonl").write_text("\n".join(json.dumps(x) for x in old))
+
+    db_path = tmp_path / "db.sqlite"
+    con = sqlite3.connect(str(db_path))
+    con.row_factory = sqlite3.Row
+    ensure_schema(con)
+    stats = importers.import_codex(con, PRICING, codex_dir=sessions, count_tokens=wc)
+    assert stats["requests"] == 0
+    assert stats["tool_calls"] == 0  # tools from a no-usage rollout are not imported
+    assert stats["skipped_no_usage"] == 1
+    assert con.execute("SELECT COUNT(*) FROM tool_calls").fetchone()[0] == 0
     con.close()

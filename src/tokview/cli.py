@@ -400,13 +400,54 @@ def import_claude(claude_dir: str | None) -> None:
 
 
 @import_grp.command(name="codex")
-def import_codex() -> None:
-    """Codex history import (not supported — logs lack token counts)."""
-    raise click.ClickException(
-        "Codex session logs (~/.codex/sessions) don't record token counts, so "
-        "historical Codex usage can't be reconstructed accurately. Use live "
-        "capture instead: tokview wrap codex"
+@click.option("--dir", "codex_dir", default=None, help="Override the Codex sessions dir.")
+def import_codex(codex_dir: str | None) -> None:
+    """Import Codex history from local rollout logs into tokview.
+
+    Reads ~/.codex/sessions/**/*.jsonl and backfills the same SQLite the live
+    proxy uses — per-turn token usage (input / cached / output / reasoning) plus
+    per-tool estimates — so your history shows up in `tokview show` and the
+    dashboard. Idempotent. Codex began persisting token usage in late 2025;
+    older rollouts that predate it are skipped.
+    """
+    import sqlite3
+    from pathlib import Path as _Path
+
+    from .importers import CODEX_SESSIONS
+    from .importers import import_codex as run_import
+    from .insights import load_pricing_map
+    from .tui import ensure_schema
+
+    tokview = load_config()
+    source = _Path(codex_dir) if codex_dir else CODEX_SESSIONS
+    if not source.exists():
+        raise click.ClickException(f"no Codex logs found at {source}")
+
+    tokview.storage.path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(str(tokview.storage.path))
+    con.row_factory = sqlite3.Row
+    try:
+        ensure_schema(con)
+        click.echo(f"importing Codex history from {source} ...")
+
+        def _progress(done: int, total: int) -> None:
+            click.echo(f"  scanned {done}/{total} rollouts", err=True)
+
+        stats = run_import(con, load_pricing_map(), codex_dir=source, progress=_progress)
+    finally:
+        con.close()
+
+    msg = (
+        f"done: {stats['sessions']} sessions from {stats['files']} rollouts · "
+        f"+{stats['requests']} requests · +{stats['tool_calls']} tool calls imported"
     )
+    if stats.get("skipped_no_usage"):
+        msg += (
+            f" · {stats['skipped_no_usage']} older rollouts skipped "
+            "(no token usage recorded)"
+        )
+    click.echo(msg)
+    click.echo("view it: tokview show --watch   (or the browser dashboard)")
 
 
 @main.command()

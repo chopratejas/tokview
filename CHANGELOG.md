@@ -7,6 +7,23 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`tokview import`** — backfill historical usage from local agent logs, no
+  proxy needed. Both write into the same SQLite the live proxy uses, so imported
+  history renders in `tokview show` and the browser dashboard immediately, and
+  both are idempotent (deduped by transcript / tool id) — safe to re-run and to
+  overlap with live-captured sessions.
+  - `tokview import claude` reads `~/.claude/projects/**/*.jsonl` — per-request
+    provider token usage plus per-tool estimates.
+  - `tokview import codex` reads `~/.codex/sessions/**/*.jsonl`, reconstructing
+    per-turn usage (input / cached / output / reasoning) by diffing each
+    rollout's cumulative `token_count` events — which also sidesteps the
+    rate-limit-only re-emit over-count — plus per-tool estimates from
+    `function_call` / `function_call_output` items (shell calls are labelled by
+    their underlying command family, e.g. `rg`, `grep`, `pytest`). Codex began
+    persisting token usage in late 2025; older rollouts that predate it are
+    skipped.
+
 ## [0.0.6] — 2026-05-30
 
 ### Added

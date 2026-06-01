@@ -26,13 +26,14 @@ That's the whole workflow — **`wrap` your agent, `show` the tokens.** Agent fl
 
 ### Already have history? Import it
 
-No proxy needed for the past — Claude Code keeps local transcripts that already record token usage, so tokview can backfill your **entire history**, tool-level:
+No proxy needed for the past — both Claude Code and recent Codex keep local logs that record token usage, so tokview can backfill your **entire history**, tool-level:
 
 ```bash
-tokview import claude     # reads ~/.claude/projects/**/*.jsonl into tokview
+tokview import claude     # reads ~/.claude/projects/**/*.jsonl
+tokview import codex       # reads ~/.codex/sessions/**/*.jsonl
 ```
 
-It reconstructs every session (per-request tokens + per-tool estimates) into the same store, so it shows up in `tokview show` and the dashboard immediately. Idempotent — safe to re-run. (Codex session logs don't record token counts, so only live `tokview wrap codex` captures Codex usage.)
+Each reconstructs every session (per-request tokens + per-tool estimates) into the same store, so it shows up in `tokview show` and the dashboard immediately. Idempotent — safe to re-run. (Codex began persisting per-turn token usage in late 2025; older Codex rollouts that predate it are skipped.)
 
 ## Where your tokens actually go
 
@@ -101,6 +102,7 @@ tokview wrap claude [CLAUDE_ARGS...]   # run Claude Code through tokview
 tokview unwrap codex                   # undo a wrap
 
 tokview import claude                  # backfill history from local Claude Code logs
+tokview import codex                   # backfill history from local Codex rollouts
 
 tokview show --watch                   # live terminal dashboard
 tokview show --latest                  # the most recently active session
