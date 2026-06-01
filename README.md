@@ -24,6 +24,16 @@ tokview wrap claude               # run your agent through tokview (another term
 
 That's the whole workflow — **`wrap` your agent, `show` the tokens.** Agent flags pass straight through (`tokview wrap codex --model gpt-5.5 --search`), and multiple Codex/Claude sessions run at once and appear separately in `tokview show`.
 
+### Already have history? Import it
+
+No proxy needed for the past — Claude Code keeps local transcripts that already record token usage, so tokview can backfill your **entire history**, tool-level:
+
+```bash
+tokview import claude     # reads ~/.claude/projects/**/*.jsonl into tokview
+```
+
+It reconstructs every session (per-request tokens + per-tool estimates) into the same store, so it shows up in `tokview show` and the dashboard immediately. Idempotent — safe to re-run. (Codex session logs don't record token counts, so only live `tokview wrap codex` captures Codex usage.)
+
 ## Where your tokens actually go
 
 Most counters stop at *"this call used 180k tokens."* tokview tells you *which tool* spent them — and catches the cost nothing else surfaces: **a big tool result (a file `Read`, an MCP dump, a `grep` over your repo) gets re-sent into every later turn**, silently multiplying your input bill. Often the single largest line item in a session is one file your agent re-read a dozen times.
@@ -89,6 +99,8 @@ Codex / Claude / SDKs ──► tokview local proxy ──► provider backend
 tokview wrap codex [CODEX_ARGS...]     # run Codex through tokview
 tokview wrap claude [CLAUDE_ARGS...]   # run Claude Code through tokview
 tokview unwrap codex                   # undo a wrap
+
+tokview import claude                  # backfill history from local Claude Code logs
 
 tokview show --watch                   # live terminal dashboard
 tokview show --latest                  # the most recently active session

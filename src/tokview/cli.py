@@ -350,6 +350,65 @@ def unwrap_codex() -> None:
         click.echo(f"no tokview Codex config found in {config_file}")
 
 
+@main.group(name="import")
+def import_grp() -> None:
+    """Backfill historical usage from local agent logs (no proxy needed)."""
+
+
+@import_grp.command(name="claude")
+@click.option("--dir", "claude_dir", default=None, help="Override the Claude Code projects dir.")
+def import_claude(claude_dir: str | None) -> None:
+    """Import Claude Code history from local transcripts into tokview.
+
+    Reads ~/.claude/projects/**/*.jsonl and backfills the same SQLite the live
+    proxy uses — sessions, per-request tokens, and per-tool estimates — so your
+    existing history shows up in `tokview show` and the dashboard. Idempotent.
+    """
+    import sqlite3
+    from pathlib import Path as _Path
+
+    from .importers import CLAUDE_PROJECTS, import_claude_code
+    from .insights import load_pricing_map
+    from .tui import ensure_schema
+
+    tokview = load_config()
+    source = _Path(claude_dir) if claude_dir else CLAUDE_PROJECTS
+    if not source.exists():
+        raise click.ClickException(f"no Claude Code logs found at {source}")
+
+    tokview.storage.path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(str(tokview.storage.path))
+    con.row_factory = sqlite3.Row
+    try:
+        ensure_schema(con)
+        click.echo(f"importing Claude Code history from {source} ...")
+
+        def _progress(done: int, total: int) -> None:
+            click.echo(f"  scanned {done}/{total} transcripts", err=True)
+
+        stats = import_claude_code(
+            con, load_pricing_map(), claude_dir=source, progress=_progress
+        )
+    finally:
+        con.close()
+
+    click.echo(
+        f"done: {stats['sessions']} sessions from {stats['files']} transcripts · "
+        f"+{stats['requests']} requests · +{stats['tool_calls']} tool calls imported"
+    )
+    click.echo("view it: tokview show --watch   (or the browser dashboard)")
+
+
+@import_grp.command(name="codex")
+def import_codex() -> None:
+    """Codex history import (not supported — logs lack token counts)."""
+    raise click.ClickException(
+        "Codex session logs (~/.codex/sessions) don't record token counts, so "
+        "historical Codex usage can't be reconstructed accurately. Use live "
+        "capture instead: tokview wrap codex"
+    )
+
+
 @main.command()
 @click.option("--yes", is_flag=True, help="Skip confirmation.")
 def reset(yes: bool) -> None:
