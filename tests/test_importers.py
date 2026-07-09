@@ -72,7 +72,11 @@ def test_parse_claude_transcript_requests_and_tools():
     reqs, tools = importers.parse_claude_transcript(TRANSCRIPT, PRICING, count_tokens=wc)
     assert len(reqs) == 1
     r = reqs[0]
-    assert r["request_id"] == "u1"
+    # request_id is the message id (msg_1), not the transcript line uuid (u1):
+    # recent Claude Code splits one assistant response across several lines with
+    # distinct uuids but a shared message id, so keying on the message id is what
+    # collapses them to a single request (see test_fanned_content_blocks_*).
+    assert r["request_id"] == "msg_1"
     assert r["provider"] == "anthropic"
     assert r["session_id"] == "claude-code-abc"
     assert r["input_tokens"] == 100 and r["output_tokens"] == 40
@@ -117,12 +121,86 @@ def test_import_claude_code_into_db_and_idempotent(tmp_path):
     assert row["provider"] == "anthropic"
     assert row["output_tokens"] == 40
 
-    # re-import: idempotent (INSERT OR IGNORE by uuid / tool id)
+    # re-import: idempotent (INSERT OR IGNORE by message id / tool id)
     stats2 = importers.import_claude_code(con, PRICING, claude_dir=proj, count_tokens=wc)
     assert stats2["requests"] == 0
     assert stats2["tool_calls"] == 0
     assert con.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 1
     con.close()
+
+
+# Recent Claude Code writes one transcript line per content block of a single
+# assistant response: same message id, distinct uuids, and the SAME usage copied
+# onto every line. Keying requests on the message id collapses them into one row
+# so the response's tokens are counted once, not once per block.
+FANNED_TRANSCRIPT = [
+    {
+        "type": "assistant",
+        "uuid": "f1",
+        "sessionId": "claude-code-fan",
+        "timestamp": "2026-05-30T10:00:00.000Z",
+        "message": {
+            "id": "msg_fan",
+            "role": "assistant",
+            "model": "claude-3-7-sonnet-20250219",
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 40,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 500,
+            },
+            "content": [{"type": "text", "text": "thinking then acting"}],
+        },
+    },
+    {
+        "type": "assistant",
+        "uuid": "f2",
+        "sessionId": "claude-code-fan",
+        "timestamp": "2026-05-30T10:00:00.000Z",
+        "message": {
+            "id": "msg_fan",
+            "role": "assistant",
+            "model": "claude-3-7-sonnet-20250219",
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 40,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 500,
+            },
+            "content": [{"type": "tool_use", "id": "toolu_f", "name": "Read", "input": {"path": "/y"}}],
+        },
+    },
+]
+
+
+def test_fanned_content_blocks_collapse_to_one_request(tmp_path):
+    # parse yields one row per assistant line, but both share the message id...
+    reqs, _ = importers.parse_claude_transcript(FANNED_TRANSCRIPT, PRICING, count_tokens=wc)
+    assert [r["request_id"] for r in reqs] == ["msg_fan", "msg_fan"]
+
+    # ...so INSERT OR IGNORE collapses them: one request, tokens counted once
+    # (not 2 rows / 80 output tokens, which is the fan-out double-count).
+    proj = tmp_path / "projects"
+    proj.mkdir()
+    _write_transcript(proj, "fan.jsonl", FANNED_TRANSCRIPT)
+    con = sqlite3.connect(str(tmp_path / "db.sqlite"))
+    con.row_factory = sqlite3.Row
+    ensure_schema(con)
+    importers.import_claude_code(con, PRICING, claude_dir=proj, count_tokens=wc)
+
+    assert con.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 1
+    row = con.execute("SELECT output_tokens, cache_read_tokens FROM requests").fetchone()
+    assert row["output_tokens"] == 40
+    assert row["cache_read_tokens"] == 500
+    con.close()
+
+
+def test_request_id_falls_back_to_uuid_without_message_id(tmp_path):
+    # A line without a message id (older transcripts) still keys on the uuid.
+    line = dict(TRANSCRIPT[0])
+    line["message"] = {k: v for k, v in TRANSCRIPT[0]["message"].items() if k != "id"}
+    reqs, _ = importers.parse_claude_transcript([line], PRICING, count_tokens=wc)
+    assert reqs[0]["request_id"] == "u1"
 
 
 def test_empty_and_malformed_lines_are_skipped(tmp_path):

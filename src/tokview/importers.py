@@ -8,9 +8,13 @@ including per-tool token estimates — straight from disk, into the *same*
 ``requests`` + ``tool_calls`` schema the live proxy writes. The TUI and the
 browser dashboard then render imported history exactly like live traffic.
 
-Idempotent: requests are keyed by the transcript line uuid and tool calls by
-the provider tool id, so re-running an import never double-counts (INSERT OR
-IGNORE) and overlap with live-proxied sessions is harmless.
+Idempotent: requests are keyed by the message id (falling back to the transcript
+line uuid) and tool calls by the provider tool id, so re-running an import never
+double-counts (INSERT OR IGNORE) and overlap with live-proxied sessions is
+harmless. Keying on the message id also collapses the multiple transcript lines
+that recent Claude Code writes for a single assistant response — one line per
+content block, each carrying a copy of the same ``usage`` — into one request row,
+instead of counting that response's tokens once per block.
 
 Codex (current CLI) writes JSONL rollouts under
 ``~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`` that persist per-turn token
@@ -145,7 +149,7 @@ def parse_claude_transcript(
         cache_read = int(usage.get("cache_read_input_tokens") or 0)
         request_rows.append(
             {
-                "request_id": entry.get("uuid") or msg.get("id"),
+                "request_id": msg.get("id") or entry.get("uuid"),
                 "ts_ms": ts_ms or last_ts or 0,
                 "provider": "anthropic",
                 "model": model,
